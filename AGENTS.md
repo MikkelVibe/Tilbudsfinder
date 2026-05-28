@@ -266,8 +266,36 @@ Relevant v1 idea to preserve: parse amount/unit from offer text or JSON, map uni
 Examples:
 
 - grams and kilograms normalize to `kg`
-- milliliters, centiliters, and liters normalize to `ltr`
-- pieces, packs, trays, and similar count units normalize to `stk` only when semantically safe
+- milliliters, centiliters, and liters normalize to `l`
+- pieces, packs, trays, sets, and pairs normalize to `stk`
+
+Normalization decisions from project planning:
+
+- Implement normalization as pure PHP DTOs/value objects/services before persistence or real adapters.
+- Parser output should use immutable readonly DTOs, not arrays or Eloquent models.
+- DTO constructors should enforce required structural fields. Optional/derived fields should return explicit normalization results.
+- Use PHP enums for normalized units and stable failure codes.
+- Use source-unit alias maps for variants such as `GR.`, `gr`, `gram`, `KG.`, `kilo`, `ML.`, `CL.`, `LTR.`, `liter`, `litr`, `STK.`, `styk`, `PK.`, `pakke`, `BK.`, `bakke`, `sæt`, and `par`.
+- Use `Brick\Math\BigDecimal` for money and unit-price math. Do not use PHP floats for business calculations.
+- Store decimal values into database decimal columns after normalizing/calculating with BigDecimal.
+- Accept Danish price formats such as `12,95`, `12.95`, `12`, `12,-`, and `12.`.
+- Offer price must be present, concrete, and positive. Missing, zero, or negative prices are invalid for public publishing.
+- Paper dates live on `papers`; offers inherit paper validity unless a later source proves per-offer validity is needed.
+- The MVP offer model assumes one price maps to one purchasable package. Do not model multi-buy fields now.
+- Conditional prices such as member-only, app-only, or loyalty/coupon prices should be excluded from MVP public publishing unless the same price is generally available.
+- Quantity limits such as `max 6 per customer` do not block publishing; preserve them as metadata for future display.
+- Ignore pant/deposit handling for MVP. Do not parse or subtract pant from prices.
+- If a grocer provides unit price, store it. If package amount/unit are available, calculate our own unit price and compare.
+- Unit-price mismatch tolerance is `0.05 DKK` after rounding to 2 decimals.
+- If source unit price and calculated unit price disagree beyond tolerance, keep the offer displayable but add a normalization warning and exclude it from confident unit-price comparison.
+- Package-like units such as `pk`, `pakke`, `bakke`, `sæt`, and `par` normalize to `stk`.
+- If a package-like unit has no explicit count, assume count `1` for amount/unit-price purposes, but use a lower confidence score than an explicit count.
+- If package amount/unit cannot be parsed but title and price are valid, partial-publish the offer without unit-price comparison and surface the failure in admin later.
+- If one offer covers a package amount range such as `500-750 g`, publish the offer price but do not calculate unit price unless the source provides a trusted unit price.
+- If one source offer represents multiple variants, the adapter decides whether to emit one offer or several. The shared contract accepts one normalized offer at a time.
+- Shared title cleanup should be minimal: trim and collapse whitespace only. Source-specific cleanup belongs in adapters.
+- `normalization_confidence` is a 0-100 integer. Use it to distinguish exact parses from assumption-based parses.
+- Stable machine-readable failure codes are required for metrics/admin/tests. Initial examples: `price_missing`, `price_invalid`, `unit_unknown`, `amount_range`, `unit_price_mismatch`, and `conditional_offer`.
 
 ## Product Matching
 
