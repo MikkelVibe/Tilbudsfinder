@@ -19,8 +19,9 @@ Run locally:
 
 ```bash
 docker compose up -d postgres redis
-./scripts/local-composer install --no-scripts
-./scripts/local-php artisan migrate
+source scripts/activate
+composer install --no-scripts
+php artisan migrate
 npm install
 ./scripts/serve-local
 ```
@@ -36,13 +37,13 @@ npm run dev
 Useful local commands:
 
 ```bash
-./scripts/local-php artisan about
-./scripts/local-php artisan migrate
-./scripts/local-php vendor/bin/phpunit
+php artisan about
+php artisan migrate
+php vendor/bin/phpunit
 npm run build
 ```
 
-Do not use `php artisan test` with the local FrankenPHP wrapper. Use `./scripts/local-php vendor/bin/phpunit` instead.
+Do not use `php artisan test` with the local FrankenPHP wrapper. Use `php vendor/bin/phpunit` after `source scripts/activate` instead.
 
 Standard setup with host PHP/Composer:
 

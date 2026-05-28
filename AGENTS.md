@@ -57,6 +57,7 @@ Start local services:
 
 ```bash
 docker compose up -d postgres redis
+source scripts/activate
 ```
 
 Run the app:
@@ -80,10 +81,10 @@ npm run dev
 Useful commands:
 
 ```bash
-./scripts/local-php artisan about
-./scripts/local-php artisan migrate
-./scripts/local-php vendor/bin/phpunit
-./scripts/local-composer install --no-scripts
+php artisan about
+php artisan migrate
+php vendor/bin/phpunit
+composer install --no-scripts
 npm install
 npm run build
 ```
@@ -91,7 +92,7 @@ npm run build
 Do not rely on `php artisan test` with the local FrankenPHP wrapper. FrankenPHP reports an empty `PHP_BINARY`, which prevents Laravel from spawning PHPUnit. Use:
 
 ```bash
-./scripts/local-php vendor/bin/phpunit
+php vendor/bin/phpunit
 ```
 
 ## Git
