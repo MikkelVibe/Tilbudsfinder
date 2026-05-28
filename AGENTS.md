@@ -39,10 +39,8 @@ Defer until later:
 - Backend: Laravel 13
 - Frontend: Inertia + Vue 3
 - Styling: Tailwind CSS 4
-- Database target: PostgreSQL
-- Local database fallback: SQLite
-- Cache/queue/locks target: Redis
-- Local cache/session/queue fallback: database drivers
+- Database: PostgreSQL
+- Cache/queue/locks: Redis
 - Search MVP: PostgreSQL full-text search and `pg_trgm`
 - Queue monitoring target: Laravel Horizon
 - Deployment target: Docker Compose on a cheap VPS
@@ -53,7 +51,13 @@ Defer until later:
 
 ## Local Development
 
-This machine does not currently have system PHP or Composer available. The project includes local wrappers around a downloaded FrankenPHP binary in `.tools`.
+This machine does not currently have system PHP or Composer available. The project includes local wrappers around a downloaded FrankenPHP binary in `.tools`. PostgreSQL and Redis run through Docker Compose.
+
+Start local services:
+
+```bash
+docker compose up -d postgres redis
+```
 
 Run the app:
 

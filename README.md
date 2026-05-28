@@ -13,15 +13,25 @@ Tilbudsfinder v2 is a Laravel-based grocery offer discovery platform. It is plan
 
 ## Local Setup
 
-This repository includes project-local wrappers for running Laravel on this machine without system PHP/Composer. They use a downloaded FrankenPHP binary in `.tools`, which is intentionally ignored by Git.
+This project uses Docker Compose for PostgreSQL and Redis locally so development matches the production data stores. The app can be run through the project-local FrankenPHP wrappers because this machine does not require host PHP/Composer.
 
-Run locally on this machine:
+Run locally:
 
 ```bash
+docker compose up -d postgres redis
+./scripts/local-composer install --no-scripts
+./scripts/local-php artisan migrate
+npm install
 ./scripts/serve-local
 ```
 
 Then open `http://127.0.0.1:8080`.
+
+Run the frontend dev server in a second terminal when needed:
+
+```bash
+npm run dev
+```
 
 Useful local commands:
 
@@ -29,12 +39,10 @@ Useful local commands:
 ./scripts/local-php artisan about
 ./scripts/local-php artisan migrate
 ./scripts/local-php vendor/bin/phpunit
-./scripts/local-composer install --no-scripts
-npm install
 npm run build
 ```
 
-Note: `php artisan test` does not work with the local FrankenPHP wrapper because this runtime reports an empty `PHP_BINARY`, which prevents Laravel from spawning PHPUnit. Use `./scripts/local-php vendor/bin/phpunit` instead.
+Do not use `php artisan test` with the local FrankenPHP wrapper. Use `./scripts/local-php vendor/bin/phpunit` instead.
 
 Standard setup with host PHP/Composer:
 
@@ -47,7 +55,7 @@ npm run build
 php artisan migrate
 ```
 
-With Docker Compose:
+Full Docker Compose app runtime:
 
 ```bash
 cp .env.example .env
