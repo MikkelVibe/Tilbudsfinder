@@ -83,13 +83,14 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->foreignUuid('grocer_id')->constrained()->cascadeOnDelete();
             $table->foreignUuid('import_batch_id')->constrained()->cascadeOnDelete();
-            $table->string('source_external_id')->nullable();
+            $table->string('source_external_id');
             $table->string('title')->nullable();
             $table->timestampTz('active_from')->index();
             $table->timestampTz('active_until')->index();
             $table->timestampsTz();
 
             $table->index(['grocer_id', 'active_from', 'active_until']);
+            $table->unique(['grocer_id', 'source_external_id']);
         });
 
         Schema::create('scraped_offers', function (Blueprint $table): void {
@@ -99,8 +100,6 @@ return new class extends Migration
             $table->foreignUuid('paper_id')->constrained()->cascadeOnDelete();
             $table->string('source_offer_id')->nullable();
             $table->string('source_product_id')->nullable();
-            $table->string('source_hash', 64)->nullable();
-            $table->unsignedInteger('source_position')->nullable();
             $table->string('title');
             $table->text('description')->nullable();
             $table->string('image_url', 2048)->nullable();

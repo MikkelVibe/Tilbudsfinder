@@ -30,6 +30,8 @@ readonly class NormalizedOffer
         public int $confidence,
         public ?string $description = null,
         public ?string $imageUrl = null,
+        public ?string $sourceOfferId = null,
+        public ?string $sourceProductId = null,
         public ?string $purchaseLimitText = null,
         public array $metadata = [],
         public ?array $sourcePayload = null,

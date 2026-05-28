@@ -205,6 +205,8 @@ class OfferNormalizer
             confidence: $confidence,
             description: $input->description,
             imageUrl: $input->imageUrl,
+            sourceOfferId: $input->sourceOfferId,
+            sourceProductId: $input->sourceProductId,
             purchaseLimitText: $input->purchaseLimitText,
             metadata: $input->metadata,
             sourcePayload: $input->sourcePayload,

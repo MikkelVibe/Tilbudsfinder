@@ -22,8 +22,6 @@ class ScrapedOfferFactory extends Factory
             'paper_id' => Paper::factory(),
             'source_offer_id' => fake()->uuid(),
             'source_product_id' => fake()->uuid(),
-            'source_hash' => hash('sha256', fake()->uuid()),
-            'source_position' => fake()->numberBetween(1, 300),
             'title' => fake()->words(3, true),
             'description' => fake()->sentence(),
             'image_url' => fake()->imageUrl(),

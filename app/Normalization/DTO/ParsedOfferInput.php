@@ -17,6 +17,8 @@ readonly class ParsedOfferInput
         public string|int|float|null $sourceUnitPrice = null,
         public ?string $description = null,
         public ?string $imageUrl = null,
+        public ?string $sourceOfferId = null,
+        public ?string $sourceProductId = null,
         public bool $isConditional = false,
         public ?string $purchaseLimitText = null,
         public array $metadata = [],
