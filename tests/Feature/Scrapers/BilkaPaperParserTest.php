@@ -128,6 +128,118 @@ class BilkaPaperParserTest extends TestCase
         $this->assertSame('43.00', $normalized->unitPrice?->decimal());
     }
 
+    public function test_it_splits_clear_tjek_description_variants_before_normalization(): void
+    {
+        $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
+        $payload['offers'][0] = $this->offer([
+            'id' => 'rynkeby-grouped',
+            'heading' => 'Rynkeby marked',
+            'description' => "50 cl. Rynkeby Shots eller Økologisk Lemonade.\n65 ml. Rynkeby Squeeze.\n70 cl. Zero.\n85 cl. Rigtig Lemonade.\n1 Liter Rynkeby 16 Serie, Frugtfrisk juice eller Rynkeby Blandet Bær frugtdrik.\nPr. færdigblandet liter max. 2,50.\nEkskl. embl.\nPr. liter max. 40.-\nFrit valg.",
+            'pricing' => ['price' => 20, 'currency' => 'DKK'],
+            'quantity' => [
+                'unit' => ['symbol' => 'cl'],
+                'size' => ['from' => 50, 'to' => 100],
+                'pieces' => ['from' => 1, 'to' => 1],
+            ],
+        ]);
+
+        $paper = (new BilkaPaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+        $splitOffers = array_values(array_filter(
+            $paper->offers,
+            static fn ($offer): bool => ($offer->metadata['original_source_offer_id'] ?? null) === 'rynkeby-grouped',
+        ));
+        $nonSplitOffers = array_values(array_filter(
+            $paper->offers,
+            static fn ($offer): bool => ($offer->metadata['variant_source'] ?? null) !== 'tjek_description_split',
+        ));
+
+        $this->assertCount(8, $splitOffers);
+        $this->assertCount(11, $nonSplitOffers);
+        $this->assertSame(
+            array_column(array_slice($payload['offers'], 1), 'id'),
+            array_map(static fn ($offer): ?string => $offer->sourceOfferId, $nonSplitOffers),
+        );
+
+        foreach ($nonSplitOffers as $index => $offer) {
+            $this->assertSame($payload['offers'][$index + 1], $offer->sourcePayload);
+        }
+
+        $this->assertSame('Rynkeby Shots 50 cl', $splitOffers[0]->title);
+        $this->assertSame('Rynkeby Økologisk Lemonade 50 cl', $splitOffers[1]->title);
+        $this->assertSame('Rynkeby Squeeze 65 ml', $splitOffers[2]->title);
+        $this->assertSame('Rynkeby Blandet Bær frugtdrik 1 Liter', $splitOffers[7]->title);
+        $this->assertSame('rynkeby-grouped:variant-01', $splitOffers[0]->sourceOfferId);
+        $this->assertSame(1, $splitOffers[0]->metadata['variant_index']);
+        $this->assertSame('tjek_description_split', $splitOffers[0]->metadata['variant_source']);
+        $this->assertSame(90, $splitOffers[0]->metadata['split_confidence']);
+        $this->assertSame('rynkeby-grouped', $splitOffers[0]->sourcePayload['_parsed_variant']['original_source_offer_id']);
+
+        $normalizer = new OfferNormalizer;
+        $shots = $normalizer->normalize($splitOffers[0]);
+        $squeeze = $normalizer->normalize($splitOffers[2]);
+
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $shots->status);
+        $this->assertSame('40.00', $shots->unitPrice?->decimal());
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $squeeze->status);
+        $this->assertSame('307.69', $squeeze->unitPrice?->decimal());
+    }
+
+    public function test_it_does_not_split_app_only_or_ambiguous_tjek_descriptions(): void
+    {
+        $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
+        $payload['offers'][0] = $this->offer([
+            'id' => 'app-only-grouped',
+            'heading' => 'Rynkeby marked',
+            'description' => 'App-pris 20 kr. Gælder kun med Bilka Plus appen. 50 cl. Rynkeby Shots eller Økologisk Lemonade.',
+            'pricing' => ['price' => 20, 'currency' => 'DKK'],
+            'quantity' => [
+                'unit' => ['symbol' => 'cl'],
+                'size' => ['from' => 50, 'to' => 50],
+                'pieces' => ['from' => 1, 'to' => 1],
+            ],
+        ]);
+        $payload['offers'][1] = $this->offer([
+            'id' => 'structured-app-price',
+            'heading' => 'Rynkeby marked',
+            'description' => 'App-pris 20 kr. Gælder kun med Bilka Plus appen. Frit valg. 30. 50 cl. Rynkeby Shots eller Økologisk Lemonade.',
+            'pricing' => ['price' => 20, 'currency' => 'DKK'],
+            'quantity' => [
+                'unit' => ['symbol' => 'cl'],
+                'size' => ['from' => 50, 'to' => 50],
+                'pieces' => ['from' => 1, 'to' => 1],
+            ],
+        ]);
+        $payload['offers'][2] = $this->offer([
+            'id' => 'ambiguous-quantities',
+            'heading' => 'Rynkeby marked',
+            'description' => '50 cl. 65 ml. 70 cl. Flere varianter. Pr. liter max. 40.- Frit valg.',
+            'pricing' => ['price' => 20, 'currency' => 'DKK'],
+            'quantity' => [
+                'unit' => ['symbol' => 'cl'],
+                'size' => ['from' => 50, 'to' => 100],
+                'pieces' => ['from' => 1, 'to' => 1],
+            ],
+        ]);
+
+        $paper = (new BilkaPaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+
+        $this->assertCount(1, array_filter($paper->offers, static fn ($offer): bool => $offer->sourceOfferId === 'app-only-grouped'));
+        $this->assertCount(1, array_filter($paper->offers, static fn ($offer): bool => $offer->sourceOfferId === 'structured-app-price'));
+        $this->assertCount(1, array_filter($paper->offers, static fn ($offer): bool => $offer->sourceOfferId === 'ambiguous-quantities'));
+        $this->assertCount(0, array_filter($paper->offers, static fn ($offer): bool => ($offer->metadata['original_source_offer_id'] ?? null) !== null));
+
+        $normalizer = new OfferNormalizer;
+
+        $appOnly = $normalizer->normalize($paper->offers[0]);
+        $structuredAppPrice = $normalizer->normalize($paper->offers[1]);
+        $ambiguous = $normalizer->normalize($paper->offers[2]);
+
+        $this->assertSame(NormalizedOfferStatus::Rejected, $appOnly->status);
+        $this->assertSame(NormalizedOfferStatus::Rejected, $structuredAppPrice->status);
+        $this->assertSame(NormalizedOfferStatus::Partial, $ambiguous->status);
+        $this->assertNull($ambiguous->unitPrice);
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
