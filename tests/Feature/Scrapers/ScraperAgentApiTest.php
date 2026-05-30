@@ -86,6 +86,37 @@ class ScraperAgentApiTest extends TestCase
             ->assertJsonPath('current_version', 'sha-old');
     }
 
+    public function test_agent_can_report_update_status_without_changing_health(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $token = 'secret-token';
+        $agent = $this->agent($token, [
+            'metadata' => ['host' => 'laptop'],
+        ]);
+
+        $this->withToken($token)
+            ->postJson('/api/scraper-agent/update-status', [
+                'status' => 'pull_failed',
+                'current_version' => 'sha-old',
+                'desired_version' => 'sha-new',
+                'message' => 'Image pull failed.',
+            ])
+            ->assertOk()
+            ->assertJson(['status' => 'ok']);
+
+        $agent->refresh();
+
+        $this->assertSame('active', $agent->status->value);
+        $this->assertSame('laptop', $agent->metadata['host']);
+        $this->assertSame([
+            'status' => 'pull_failed',
+            'current_version' => 'sha-old',
+            'desired_version' => 'sha-new',
+            'message' => 'Image pull failed.',
+            'reported_at' => '2026-06-01T12:00:00+00:00',
+        ], $agent->metadata['latest_update_status']);
+    }
+
     public function test_agent_can_upload_raw_payloads_for_synchronous_ingest(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');

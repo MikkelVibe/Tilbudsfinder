@@ -40,6 +40,20 @@ if [ -z "$server" ] || [ -z "$token" ]; then
     exit 1
 fi
 
+report_update_status() {
+    status="$1"
+    desired_version_value="$2"
+    message="$3"
+
+    curl -fsS \
+        -H "Authorization: Bearer ${token}" \
+        -H 'Accept: application/json' \
+        -H 'Content-Type: application/json' \
+        -X POST \
+        -d "{\"status\":\"${status}\",\"current_version\":\"${current_version}\",\"desired_version\":\"${desired_version_value}\",\"message\":\"${message}\"}" \
+        "${server%/}/api/scraper-agent/update-status" >/dev/null || true
+}
+
 desired_version="$(curl -fsS -H "Authorization: Bearer ${token}" -H 'Accept: application/json' "${server%/}/api/scraper-agent/version" \
     | sed -n 's/.*"desired_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 
@@ -49,6 +63,7 @@ if [ -z "$desired_version" ]; then
 fi
 
 if [ "$desired_version" = "$current_version" ]; then
+    report_update_status current "$desired_version" "Scraper agent already current."
     echo "Scraper agent already current: ${current_version}."
     exit 0
 fi
@@ -66,12 +81,17 @@ trap cleanup EXIT
 
 echo "Pulling scraper agent image before updating env: ${desired_image}"
 
-if ! docker compose --env-file "$tmp_env" -f "$COMPOSE_FILE" pull scraper-agent; then
+if ! pull_output="$(docker compose --env-file "$tmp_env" -f "$COMPOSE_FILE" pull scraper-agent 2>&1)"; then
+    printf '%s\n' "$pull_output"
+    report_update_status pull_failed "$desired_version" "Image pull failed. See laptop systemd journal for details."
     echo "Image pull failed. Keeping current scraper agent version: ${current_version}." >&2
     exit 1
 fi
 
+printf '%s\n' "$pull_output"
+
 set_env_value TILBUDSFINDER_IMAGE "$desired_image"
 set_env_value SCRAPER_AGENT_VERSION "$desired_version"
+report_update_status updated "$desired_version" "Scraper agent image pulled and env updated."
 
 echo "Updated scraper agent from ${current_version} to ${desired_version}."

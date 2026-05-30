@@ -41,6 +41,34 @@ class ScraperAgentController extends Controller
         ]);
     }
 
+    public function updateStatus(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'in:current,updated,pull_failed'],
+            'current_version' => ['nullable', 'string', 'max:255'],
+            'desired_version' => ['nullable', 'string', 'max:255'],
+            'message' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $agent = $this->agent($request);
+        $metadata = $agent->metadata ?? [];
+        $metadata['latest_update_status'] = [
+            'status' => $validated['status'],
+            'current_version' => $validated['current_version'] ?? null,
+            'desired_version' => $validated['desired_version'] ?? null,
+            'message' => $validated['message'] ?? null,
+            'reported_at' => now()->toIso8601String(),
+        ];
+
+        $agent->update([
+            'metadata' => $metadata,
+        ]);
+
+        return response()->json([
+            'status' => 'ok',
+        ]);
+    }
+
     public function claimJob(Request $request, ScrapeJobWorker $worker): JsonResponse
     {
         $agent = $this->agent($request);
