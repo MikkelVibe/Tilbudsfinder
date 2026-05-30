@@ -38,12 +38,25 @@ mkdir -p backups nginx
 
 docker compose pull app queue scheduler
 
+docker compose up -d postgres redis
+
+attempts=0
+until docker compose exec -T postgres pg_isready -U "$(grep '^DB_USERNAME=' .env | cut -d= -f2-)" -d "$(grep '^DB_DATABASE=' .env | cut -d= -f2-)"; do
+    attempts=$((attempts + 1))
+
+    if [ "$attempts" -ge 30 ]; then
+        echo "PostgreSQL did not become ready in time." >&2
+        exit 1
+    fi
+
+    sleep 2
+done
+
 if docker compose ps --status running postgres | grep -q postgres; then
     timestamp="$(date -u +%Y%m%d%H%M%S)"
     docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > "backups/postgres-${timestamp}.sql"
 fi
 
-docker compose up -d postgres redis
 docker compose run --rm app php artisan migrate --force --no-interaction
 docker compose up -d app web queue scheduler
 docker compose ps
