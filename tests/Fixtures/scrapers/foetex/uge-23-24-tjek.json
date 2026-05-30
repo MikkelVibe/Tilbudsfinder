@@ -1,0 +1,141 @@
+{
+  "catalog": {
+    "id": "j-n7jfCA",
+    "label": "Uge 23/24",
+    "run_from": "2026-05-28T22:00:00+0000",
+    "run_till": "2026-06-11T21:59:59+0000",
+    "offer_count": 476,
+    "fetched_offer_count": 12,
+    "offer_count_mismatch": 464,
+    "page_count": 93,
+    "source_strategy": "tjek_weekly_catalog_offers",
+    "dealer_id": "bdf5A",
+    "dealer": {
+      "name": "føtex"
+    }
+  },
+  "offers": [
+    {
+      "id": "offer-1",
+      "heading": "salling Danske skrabeæg",
+      "description": "10 stk. Str. M/L. Pr. stk. 2,50",
+      "catalog_page": 26,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "pcs"}, "size": {"from": 10, "to": 10}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/aeg.webp"},
+      "catalog_id": "j-n7jfCA",
+      "run_from": "2026-05-28T22:00:00+0000",
+      "run_till": "2026-06-11T21:59:59+0000"
+    },
+    {
+      "id": "offer-2",
+      "heading": "Magnum is 3-pak",
+      "description": "300 ml. Flere varianter. Pr. liter 83,33",
+      "catalog_page": 1,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "ml"}, "size": {"from": 300, "to": 300}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/magnum.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-3",
+      "heading": "Ølmarked",
+      "description": "18x33 cl. ds. Grøn Tuborg, Carlsberg Pilsner eller Nordlyst. Gælder kun lukkede forpakninger. Ekskl. embl. Pr. liter max. 12,63",
+      "catalog_page": 5,
+      "pricing": {"price": 75, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "cl"}, "size": {"from": 33, "to": 33}, "pieces": {"from": 18, "to": 18}},
+      "images": {"zoom": "https://images.example/foetex/oel.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-4",
+      "heading": "Arla Protein drik eller Cultura drikkeyoghurt",
+      "description": "Note: App-pris 10,00 kr. | 500 ml. Pr. liter 30,-. plus pris 10,-. Pr. liter 20,-. Gælder kun med føtex plus appen",
+      "catalog_page": 3,
+      "pricing": {"price": 15, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "ml"}, "size": {"from": 500, "to": 500}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/protein.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-5",
+      "heading": "Sun Lolly",
+      "description": "Flere varianter. Pr. is max. 1,71",
+      "catalog_page": 3,
+      "pricing": {"price": 12, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "pcs"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/sun-lolly.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-6",
+      "heading": "Kyllingebrystfilet",
+      "description": "450 g. Pr. kg 66,67.",
+      "catalog_page": 10,
+      "pricing": {"price": 30, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 450, "to": 450}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/kylling.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-7",
+      "heading": "Skyr",
+      "description": "1 kg. Pr. kg 25,00.",
+      "catalog_page": 11,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "kg"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/skyr.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-8",
+      "heading": "Pasta",
+      "description": "500 g. Pr. kg 20,00.",
+      "catalog_page": 12,
+      "pricing": {"price": 10, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 500, "to": 500}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/pasta.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-9",
+      "heading": "Kaffe",
+      "description": "400 g. Pr. kg 62,50.",
+      "catalog_page": 13,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 400, "to": 400}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/kaffe.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-10",
+      "heading": "Mælk",
+      "description": "1 liter. Pr. liter 10,00.",
+      "catalog_page": 14,
+      "pricing": {"price": 10, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "liter"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/maelk.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-11",
+      "heading": "Toiletpapir",
+      "description": "8 ruller. Pr. stk. 2,50.",
+      "catalog_page": 15,
+      "pricing": {"price": 20, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "stk"}, "size": {"from": 8, "to": 8}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/toiletpapir.webp"},
+      "catalog_id": "j-n7jfCA"
+    },
+    {
+      "id": "offer-12",
+      "heading": "Vindruer",
+      "description": "500 g. Pr. kg 30,00.",
+      "catalog_page": 16,
+      "pricing": {"price": 15, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 500, "to": 500}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/foetex/vindruer.webp"},
+      "catalog_id": "j-n7jfCA"
+    }
+  ]
+}

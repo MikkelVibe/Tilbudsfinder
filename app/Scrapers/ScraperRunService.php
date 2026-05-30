@@ -7,6 +7,8 @@ use App\Imports\ImportPersistencePipeline;
 use App\Models\Grocer;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
+use App\Scrapers\Foetex\FoetexScraper;
+use App\Scrapers\Netto\NettoScraper;
 use App\Scrapers\Rema1000\Rema1000Scraper;
 
 class ScraperRunService
@@ -51,6 +53,8 @@ class ScraperRunService
     private function scraper(string $grocerKey, bool $sleepBetweenDetailRequests): GrocerScraper
     {
         return match ($grocerKey) {
+            'foetex' => new FoetexScraper,
+            'netto' => new NettoScraper,
             'rema1000' => new Rema1000Scraper(sleepBetweenDetailRequests: $sleepBetweenDetailRequests),
             default => throw new ScraperRunException("Scraper [{$grocerKey}] is not supported."),
         };

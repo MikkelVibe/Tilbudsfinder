@@ -1,0 +1,142 @@
+{
+  "catalog": {
+    "id": "DX0mvqOS",
+    "label": "Uge 23",
+    "run_from": "2026-05-29T22:00:00+0000",
+    "run_till": "2026-06-05T21:59:59+0000",
+    "offer_count": 211,
+    "fetched_offer_count": 12,
+    "offer_count_mismatch": 199,
+    "page_count": 36,
+    "pdf_url": "https://squid-api.tjek.com/v2/catalogs/DX0mvqOS/download",
+    "source_strategy": "tjek_weekly_catalog_offers",
+    "dealer_id": "9ba51",
+    "dealer": {
+      "name": "Netto"
+    }
+  },
+  "offers": [
+    {
+      "id": "offer-1",
+      "heading": "Danske jordbær",
+      "description": "PR. BAKKE. 350 g. Danmark. Pr. kg 71,43.",
+      "catalog_page": 13,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 350, "to": 350}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/jordbaer.webp"},
+      "catalog_id": "DX0mvqOS",
+      "run_from": "2026-05-29T22:00:00+0000",
+      "run_till": "2026-06-05T21:59:59+0000"
+    },
+    {
+      "id": "offer-2",
+      "heading": "Livskraft skrabeæg",
+      "description": "8 stk. Str. M/L. Pr. stk. 2,50.",
+      "catalog_page": 5,
+      "pricing": {"price": 20, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "pcs"}, "size": {"from": 8, "to": 8}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/aeg.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-3",
+      "heading": "Tuborg Grøn eller Carlsberg Pilsner",
+      "description": "Note: Maks. 6 | 18x33 cl. ds. + Pant. Pr. liter 11,62. Max 6 rammer pr. variant pr. kunde pr. dag til denne pris.",
+      "catalog_page": 6,
+      "pricing": {"price": 69, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "cl"}, "size": {"from": 33, "to": 33}, "pieces": {"from": 18, "to": 18}},
+      "images": {"zoom": "https://images.example/netto/oel.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-4",
+      "heading": "Faxe Kondi eller Pepsi Max sodavand",
+      "description": "PRISEN GÆLDER KUN VED KØB AF HELE FORPAKNINGER. 24 x 33 cl. + pant. Pr. liter 9,47.",
+      "catalog_page": 21,
+      "pricing": {"price": 75, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "cl"}, "size": {"from": 33, "to": 33}, "pieces": {"from": 24, "to": 24}},
+      "images": {"zoom": "https://images.example/netto/sodavand.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-5",
+      "heading": "Kyllingebrystfilet",
+      "description": "450 g. Pr. kg 66,67.",
+      "catalog_page": 7,
+      "pricing": {"price": 30, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 450, "to": 450}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/kylling.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-6",
+      "heading": "Skyr",
+      "description": "1 kg. Pr. kg 25,00.",
+      "catalog_page": 8,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "kg"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/skyr.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-7",
+      "heading": "Smørbart blandingsprodukt",
+      "description": "200 g. Pr. kg 75,00.",
+      "catalog_page": 9,
+      "pricing": {"price": 15, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 200, "to": 200}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/smoer.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-8",
+      "heading": "Pasta",
+      "description": "500 g. Pr. kg 20,00.",
+      "catalog_page": 10,
+      "pricing": {"price": 10, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 500, "to": 500}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/pasta.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-9",
+      "heading": "Kaffe",
+      "description": "400 g. Pr. kg 62,50.",
+      "catalog_page": 11,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 400, "to": 400}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/kaffe.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-10",
+      "heading": "Mælk",
+      "description": "1 liter. Pr. liter 10,00.",
+      "catalog_page": 12,
+      "pricing": {"price": 10, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "liter"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/maelk.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-11",
+      "heading": "Toiletpapir",
+      "description": "8 ruller. Pr. stk. 2,50.",
+      "catalog_page": 14,
+      "pricing": {"price": 20, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "stk"}, "size": {"from": 8, "to": 8}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/toiletpapir.webp"},
+      "catalog_id": "DX0mvqOS"
+    },
+    {
+      "id": "offer-12",
+      "heading": "Vindruer",
+      "description": "500 g. Pr. kg 30,00.",
+      "catalog_page": 15,
+      "pricing": {"price": 15, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 500, "to": 500}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/netto/vindruer.webp"},
+      "catalog_id": "DX0mvqOS"
+    }
+  ]
+}
