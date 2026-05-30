@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['grocer_id', 'scraper_agent_id', 'status', 'attempt', 'max_attempts', 'scheduled_for', 'leased_until', 'started_at', 'finished_at', 'failure_reason', 'context'])]
+#[Fillable(['grocer_id', 'scraper_agent_id', 'status', 'attempt', 'max_attempts', 'scheduled_for', 'leased_until', 'started_at', 'finished_at', 'payload_received_at', 'failure_reason', 'context'])]
 class ScrapeJob extends Model
 {
     /** @use HasFactory<ScrapeJobFactory> */
@@ -42,6 +42,7 @@ class ScrapeJob extends Model
             'leased_until' => 'immutable_datetime',
             'started_at' => 'immutable_datetime',
             'finished_at' => 'immutable_datetime',
+            'payload_received_at' => 'immutable_datetime',
             'context' => 'array',
         ];
     }

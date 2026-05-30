@@ -123,4 +123,6 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'scraper_agent_version' => env('SCRAPER_AGENT_VERSION', 'local'),
+
 ];

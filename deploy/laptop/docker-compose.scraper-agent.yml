@@ -1,0 +1,18 @@
+services:
+  scraper-agent:
+    image: ${TILBUDSFINDER_IMAGE:?Set TILBUDSFINDER_IMAGE to the GHCR image tag}
+    restart: "no"
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?Set APP_KEY for Laravel bootstrap}
+      SCRAPER_AGENT_SERVER: ${SCRAPER_AGENT_SERVER:?Set SCRAPER_AGENT_SERVER to the VPS URL}
+      SCRAPER_AGENT_TOKEN: ${SCRAPER_AGENT_TOKEN:?Set SCRAPER_AGENT_TOKEN from scraper-agent:token}
+      SCRAPER_AGENT_VERSION: ${SCRAPER_AGENT_VERSION:-local}
+    command:
+      - php
+      - artisan
+      - scraper-agent:work
+      - --server=${SCRAPER_AGENT_SERVER}
+      - --token=${SCRAPER_AGENT_TOKEN}
+      - --app-version=${SCRAPER_AGENT_VERSION:-local}

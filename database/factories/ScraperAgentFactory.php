@@ -19,8 +19,11 @@ class ScraperAgentFactory extends Factory
         return [
             'name' => $name,
             'slug' => Str::slug($name).'-'.fake()->unique()->numberBetween(1000, 9999),
+            'token_hash' => hash('sha256', fake()->sha256()),
             'status' => ScraperAgentStatus::Active,
+            'app_version' => 'test',
             'last_seen_at' => now(),
+            'last_heartbeat_at' => now(),
             'metadata' => [
                 'host' => fake()->domainWord(),
             ],

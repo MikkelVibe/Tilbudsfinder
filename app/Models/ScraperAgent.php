@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'slug', 'status', 'last_seen_at', 'metadata'])]
+#[Fillable(['name', 'slug', 'token_hash', 'status', 'app_version', 'last_seen_at', 'last_heartbeat_at', 'metadata'])]
 class ScraperAgent extends Model
 {
     /** @use HasFactory<ScraperAgentFactory> */
@@ -26,6 +26,7 @@ class ScraperAgent extends Model
         return [
             'status' => ScraperAgentStatus::class,
             'last_seen_at' => 'immutable_datetime',
+            'last_heartbeat_at' => 'immutable_datetime',
             'metadata' => 'array',
         ];
     }

@@ -25,6 +25,7 @@ class ScrapeJobFactory extends Factory
             'leased_until' => null,
             'started_at' => null,
             'finished_at' => null,
+            'payload_received_at' => null,
             'failure_reason' => null,
             'context' => null,
         ];

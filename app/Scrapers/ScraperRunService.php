@@ -5,6 +5,7 @@ namespace App\Scrapers;
 use App\Imports\Exceptions\DuplicatePaperImportException;
 use App\Imports\ImportPersistencePipeline;
 use App\Models\Grocer;
+use App\Models\ScrapeJob;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
 use App\Scrapers\Foetex\FoetexScraper;
@@ -17,7 +18,7 @@ class ScraperRunService
         private readonly ImportPersistencePipeline $pipeline = new ImportPersistencePipeline,
     ) {}
 
-    public function run(string $grocerKey, ?int $limit = null, bool $sleepBetweenDetailRequests = true, ?callable $progress = null): ScraperRunResult
+    public function run(string $grocerKey, ?int $limit = null, bool $sleepBetweenDetailRequests = true, ?callable $progress = null, ?ScrapeJob $scrapeJob = null): ScraperRunResult
     {
         $scraper = $this->scraper($grocerKey, $sleepBetweenDetailRequests);
         $grocer = Grocer::query()->where('slug', $scraper->grocerKey())->first();
@@ -33,7 +34,7 @@ class ScraperRunService
         foreach ($payloads as $payload) {
             try {
                 $this->progress($progress, "Importing paper {$payload->sourceExternalId} ({$payload->title})...");
-                $this->pipeline->persist($grocer, $scraper->parse($payload));
+                $this->pipeline->persist($grocer, $scraper->parse($payload), $scrapeJob);
                 $importedCount++;
                 $this->progress($progress, "Imported paper {$payload->sourceExternalId}.");
             } catch (DuplicatePaperImportException) {
@@ -48,6 +49,11 @@ class ScraperRunService
             importedPaperCount: $importedCount,
             skippedDuplicateCount: $skippedDuplicateCount,
         );
+    }
+
+    public function scraperFor(string $grocerKey, bool $sleepBetweenDetailRequests = true): GrocerScraper
+    {
+        return $this->scraper($grocerKey, $sleepBetweenDetailRequests);
     }
 
     private function scraper(string $grocerKey, bool $sleepBetweenDetailRequests): GrocerScraper

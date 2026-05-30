@@ -3,25 +3,39 @@ name: Tests
 on:
   push:
     branches:
-      - master
-      - '*.x'
+      - main
   pull_request:
-  schedule:
-    - cron: '0 0 * * *'
 
 permissions:
   contents: read
 
 jobs:
-  tests:
+  phpunit:
     runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: true
-      matrix:
-        php: [8.3, 8.4, 8.5]
-
-    name: PHP ${{ matrix.php }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: tilbudsfinder_test
+          POSTGRES_USER: tilbudsfinder
+          POSTGRES_PASSWORD: secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U tilbudsfinder -d tilbudsfinder_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
       - name: Checkout code
@@ -30,18 +44,32 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
+          php-version: '8.5'
+          extensions: bcmath, ctype, curl, dom, fileinfo, filter, intl, mbstring, openssl, pcntl, pdo_pgsql, tokenizer, xml, zip
           coverage: none
 
       - name: Install Composer dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
 
-      - name: Copy environment file
-        run: cp .env.example .env
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
 
-      - name: Generate app key
-        run: php artisan key:generate
-
-      - name: Execute tests
-        run: php artisan test
+      - name: Run PHPUnit
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: tilbudsfinder_test
+          DB_USERNAME: tilbudsfinder
+          DB_PASSWORD: secret
+          CACHE_STORE: redis
+          QUEUE_CONNECTION: redis
+          SESSION_DRIVER: array
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          SCRAPER_AGENT_VERSION: local
+        run: php vendor/bin/phpunit

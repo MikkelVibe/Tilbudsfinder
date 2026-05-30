@@ -1,0 +1,11 @@
+[Unit]
+Description=Tilbudsfinder scraper agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/tilbudsfinder-agent
+EnvironmentFile=%h/tilbudsfinder-agent/.env
+ExecStart=/usr/bin/docker compose --env-file %h/tilbudsfinder-agent/.env -f %h/tilbudsfinder-agent/docker-compose.scraper-agent.yml run --rm scraper-agent
+TimeoutStartSec=4h
