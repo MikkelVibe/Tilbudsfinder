@@ -111,10 +111,11 @@ class BilkaPaperParser
             title: $this->requiredString($offer, 'heading'),
             price: Arr::get($offer, 'pricing.price'),
             packageText: $this->packageText($offer),
-            sourceUnitPrice: $this->sourceUnitPrice($offer),
+            sourceUnitPriceText: $this->optionalString($offer, 'description'),
             description: $this->optionalString($offer, 'description'),
             imageUrl: $this->imageUrl($offer),
             sourceOfferId: $this->optionalString($offer, 'id'),
+            isConditional: $this->isConditional($offer),
             purchaseLimitText: $this->purchaseLimitText($offer),
             metadata: array_filter([
                 'catalog_page' => Arr::get($offer, 'catalog_page'),
@@ -170,20 +171,6 @@ class BilkaPaperParser
     /**
      * @param  array<string, mixed>  $offer
      */
-    private function sourceUnitPrice(array $offer): ?string
-    {
-        $description = $this->optionalString($offer, 'description');
-
-        if ($description === null || preg_match('/Pr\.\s*(?:liter|kg|stk\.)\s*(?:max\.\s*)?(?<price>\d+(?:[,.]\d+)?)/iu', $description, $matches) !== 1) {
-            return null;
-        }
-
-        return $matches['price'];
-    }
-
-    /**
-     * @param  array<string, mixed>  $offer
-     */
     private function imageUrl(array $offer): ?string
     {
         foreach (['images.zoom', 'images.view', 'images.thumb'] as $key) {
@@ -195,6 +182,50 @@ class BilkaPaperParser
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
+    private function isConditional(array $offer): bool
+    {
+        $description = $this->optionalString($offer, 'description');
+
+        if ($description === null || ! preg_match('/\b(?:app-pris|plus pris|bilka plus|gælder kun med bilka plus appen)\b/iu', $description)) {
+            return false;
+        }
+
+        $structuredPrice = Arr::get($offer, 'pricing.price');
+
+        if (! is_numeric($structuredPrice)) {
+            return true;
+        }
+
+        $appPrice = $this->appPrice($description);
+
+        if ($appPrice !== null && (float) $structuredPrice === (float) $appPrice) {
+            return true;
+        }
+
+        return ! $this->containsGeneralPrice($description, (float) $structuredPrice);
+    }
+
+    private function appPrice(string $description): ?float
+    {
+        if (preg_match('/\bApp-pris\s*(?<price>\d+(?:[,.]\d+)?)/iu', $description, $matches) !== 1) {
+            return null;
+        }
+
+        return (float) str_replace(',', '.', $matches['price']);
+    }
+
+    private function containsGeneralPrice(string $description, float $price): bool
+    {
+        $pricePattern = preg_quote(rtrim(rtrim(number_format($price, 2, '.', ''), '0'), '.'), '/');
+        $pricePattern = str_replace('\.', '[,.]', $pricePattern);
+
+        return preg_match('/\b(?:FRIT\s+VALG\.?)\s*'.$pricePattern.'\b/iu', $description) === 1
+            || preg_match('/\b'.$pricePattern.'\.\s*(?:Italien|Frankrig|Spanien|Australien|Danmark)\b/iu', $description) === 1;
     }
 
     /**

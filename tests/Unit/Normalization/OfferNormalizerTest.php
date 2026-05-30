@@ -142,4 +142,19 @@ class OfferNormalizerTest extends TestCase
         $this->assertSame(95, $offer->confidence);
         $this->assertSame([], $offer->issues);
     }
+
+    public function test_it_picks_source_unit_price_matching_compare_unit_from_text(): void
+    {
+        $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
+            title: 'Striploin',
+            price: '349',
+            packageText: 'Pr. stk. 2-3 kg. Kan steges hel. Pr. kg max. 174.50.',
+            sourceUnitPriceText: 'Pr. stk. 2-3 kg. Kan steges hel. Pr. kg max. 174.50.',
+        ));
+
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $offer->status);
+        $this->assertSame('174.50', $offer->sourceUnitPrice?->decimal());
+        $this->assertSame('174.50', $offer->calculatedUnitPrice?->decimal());
+        $this->assertSame('174.50', $offer->unitPrice?->decimal());
+    }
 }

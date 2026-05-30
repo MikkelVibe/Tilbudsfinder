@@ -16,20 +16,13 @@ class PackageQuantityParser
     public function parse(?string $text): PackageQuantity
     {
         $text = $this->removePurchaseLimitPhrases(trim((string) $text));
+        $text = $this->removeSourceCompareUnitPricePhrases($text);
 
         if ($text === '') {
             throw new NormalizationParseException('Package amount is missing.');
         }
 
-        if ($quantity = $this->parseAmountRange($text)) {
-            return $quantity;
-        }
-
-        if ($quantity = $this->parseMultiplier($text)) {
-            return $quantity;
-        }
-
-        if ($quantity = $this->parseAmountUnit($text)) {
+        if ($quantity = $this->parseBestQuantity($text)) {
             return $quantity;
         }
 
@@ -40,6 +33,25 @@ class PackageQuantityParser
         throw new NormalizationParseException('Package unit is unknown.');
     }
 
+    private function parseBestQuantity(string $text): ?PackageQuantity
+    {
+        $quantities = [
+            ...$this->parseMultipliers($text),
+            ...$this->parseAmountRanges($text),
+            ...$this->parseAmountUnits($this->removeCompositeQuantityPhrases($text)),
+        ];
+
+        $best = null;
+
+        foreach ($quantities as $quantity) {
+            if ($best === null || $quantity->normalizedAmount()->isLessThan($best->normalizedAmount())) {
+                $best = $quantity;
+            }
+        }
+
+        return $best;
+    }
+
     private function removePurchaseLimitPhrases(string $text): string
     {
         $text = preg_replace('/\b(?:maks|max)\.\s*\d+(?:[,.]\d+)?\s*(?:stk\.?|styk|stykker)?\s*(?:til\s+denne\s+pris)?\b/iu', ' ', $text) ?? $text;
@@ -47,59 +59,96 @@ class PackageQuantityParser
         return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }
 
-    private function parseAmountRange(string $text): ?PackageQuantity
+    private function removeSourceCompareUnitPricePhrases(string $text): string
     {
-        $unitPattern = $this->unitAliasMap->unitPattern();
+        $text = preg_replace('/\b(?:\d+(?:[,.]\d+)?|-)\s*pr\.\s*(?:liter|ltr\.?|l\.?|kg|kilo)\b/iu', ' ', $text) ?? $text;
+        $text = preg_replace('/\bPr\.\s*(?:liter|ltr\.?|l\.?|kg|kilo)\s*(?:max\.\s*)?(?:\d+(?:[,.]\d+)?|-)/iu', ' ', $text) ?? $text;
 
-        if (! preg_match('/(?<from>\d+(?:[,.]\d+)?)\s*(?:-|–)\s*(?<to>\d+(?:[,.]\d+)?)\s*(?<unit>'.$unitPattern.')\b/iu', $text, $matches)) {
-            return null;
-        }
-
-        $unit = $this->unitAliasMap->normalize($matches['unit']);
-
-        if (! $unit) {
-            return null;
-        }
-
-        $amount = $this->decimal($matches['from']);
-
-        return new PackageQuantity($amount, $unit, $matches['unit']);
+        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }
 
-    private function parseMultiplier(string $text): ?PackageQuantity
+    private function removeCompositeQuantityPhrases(string $text): string
     {
         $unitPattern = $this->unitAliasMap->unitPattern();
+        $text = preg_replace('/\d+(?:[,.]\d+)?\s*[x×]\s*\d+(?:[,.]\d+)?\s*(?:'.$unitPattern.')\b/iu', ' ', $text) ?? $text;
+        $text = preg_replace('/\d+(?:[,.]\d+)?\s*(?:-|–)\s*\d+(?:[,.]\d+)?\s*(?:'.$unitPattern.')\b/iu', ' ', $text) ?? $text;
 
-        if (! preg_match('/(?<count>\d+(?:[,.]\d+)?)\s*[x×]\s*(?<amount>\d+(?:[,.]\d+)?)\s*(?<unit>'.$unitPattern.')\b/iu', $text, $matches)) {
-            return null;
-        }
-
-        $unit = $this->unitAliasMap->normalize($matches['unit']);
-
-        if (! $unit) {
-            return null;
-        }
-
-        $amount = $this->decimal($matches['count'])->multipliedBy($this->decimal($matches['amount']));
-
-        return new PackageQuantity($amount, $unit, $matches['unit']);
+        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }
 
-    private function parseAmountUnit(string $text): ?PackageQuantity
+    /**
+     * @return list<PackageQuantity>
+     */
+    private function parseAmountRanges(string $text): array
     {
         $unitPattern = $this->unitAliasMap->unitPattern();
+        preg_match_all('/(?<from>\d+(?:[,.]\d+)?)\s*(?:-|–)\s*(?<to>\d+(?:[,.]\d+)?)\s*(?<unit>'.$unitPattern.')\b/iu', $text, $matches, PREG_SET_ORDER);
 
-        if (! preg_match('/(?<amount>\d+(?:[,.]\d+)?)\s*(?<unit>'.$unitPattern.')\b/iu', $text, $matches)) {
-            return null;
+        return array_values(array_filter(array_map(function (array $matches): ?PackageQuantity {
+            $unit = $this->unitAliasMap->normalize($matches['unit']);
+
+            if (! $unit) {
+                return null;
+            }
+
+            return new PackageQuantity($this->rangeStartAmount($matches['from'], $matches['to'], $unit), $unit, $matches['unit']);
+        }, $matches)));
+    }
+
+    private function rangeStartAmount(string $from, string $to, PackageUnit $unit): BigDecimal
+    {
+        $fromDecimal = $this->decimal($from);
+        $toDecimal = $this->decimal($to);
+
+        if ($unit === PackageUnit::Kilogram && $fromDecimal->isGreaterThan('10') && $toDecimal->isLessThanOrEqualTo('10')) {
+            return $fromDecimal->dividedBy('1000', 6);
         }
 
-        $unit = $this->unitAliasMap->normalize($matches['unit']);
-
-        if (! $unit) {
-            return null;
+        if ($unit === PackageUnit::Liter && $fromDecimal->isGreaterThan('10') && $toDecimal->isLessThanOrEqualTo('10')) {
+            return $fromDecimal->dividedBy('1000', 6);
         }
 
-        return new PackageQuantity($this->decimal($matches['amount']), $unit, $matches['unit']);
+        return $fromDecimal;
+    }
+
+    /**
+     * @return list<PackageQuantity>
+     */
+    private function parseMultipliers(string $text): array
+    {
+        $unitPattern = $this->unitAliasMap->unitPattern();
+        preg_match_all('/(?<count>\d+(?:[,.]\d+)?)\s*[x×]\s*(?<amount>\d+(?:[,.]\d+)?)\s*(?<unit>'.$unitPattern.')\b/iu', $text, $matches, PREG_SET_ORDER);
+
+        return array_values(array_filter(array_map(function (array $matches): ?PackageQuantity {
+            $unit = $this->unitAliasMap->normalize($matches['unit']);
+
+            if (! $unit) {
+                return null;
+            }
+
+            $amount = $this->decimal($matches['count'])->multipliedBy($this->decimal($matches['amount']));
+
+            return new PackageQuantity($amount, $unit, $matches['unit']);
+        }, $matches)));
+    }
+
+    /**
+     * @return list<PackageQuantity>
+     */
+    private function parseAmountUnits(string $text): array
+    {
+        $unitPattern = $this->unitAliasMap->unitPattern();
+        preg_match_all('/(?<![\d,.\-–x×])(?<amount>\d+(?:[,.]\d+)?)\s*(?<unit>'.$unitPattern.')\b/iu', $text, $matches, PREG_SET_ORDER);
+
+        return array_values(array_filter(array_map(function (array $matches): ?PackageQuantity {
+            $unit = $this->unitAliasMap->normalize($matches['unit']);
+
+            if (! $unit) {
+                return null;
+            }
+
+            return new PackageQuantity($this->decimal($matches['amount']), $unit, $matches['unit']);
+        }, $matches)));
     }
 
     private function parseUnitOnly(string $text): ?PackageQuantity

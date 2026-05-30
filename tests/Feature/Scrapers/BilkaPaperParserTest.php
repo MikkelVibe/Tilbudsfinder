@@ -10,6 +10,8 @@ use App\Models\ImportBatch;
 use App\Models\NormalizationFailure;
 use App\Models\Paper;
 use App\Models\ScrapedOffer;
+use App\Normalization\Enums\NormalizedOfferStatus;
+use App\Normalization\OfferNormalizer;
 use App\Scrapers\Bilka\BilkaPaperParser;
 use App\Scrapers\Exceptions\ScraperParseException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -39,7 +41,7 @@ class BilkaPaperParserTest extends TestCase
         $this->assertSame('Coca-Cola sodavand', $offer->title);
         $this->assertSame(11, $offer->price);
         $this->assertSame('Note: Maks. 12 | 1,5 liter. Flere varianter. Ekskl. embl. Pr. liter 7.33. FRIT VALG. MAX. 12 STK TIL DENNE PRIS. 1.5 l', $offer->packageText);
-        $this->assertSame('7.33', $offer->sourceUnitPrice);
+        $this->assertSame('Note: Maks. 12 | 1,5 liter. Flere varianter. Ekskl. embl. Pr. liter 7.33. FRIT VALG. MAX. 12 STK TIL DENNE PRIS.', $offer->sourceUnitPriceText);
         $this->assertSame('Maks. 12', $offer->purchaseLimitText);
         $this->assertSame('offer-2', $offer->sourceOfferId);
         $this->assertSame('https://images.example/bilka/cola.webp', $offer->imageUrl);
@@ -84,6 +86,67 @@ class BilkaPaperParserTest extends TestCase
         $this->expectExceptionMessage('Bilka paper must contain at least 10 parsed offers.');
 
         (new BilkaPaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_it_rejects_app_only_bilka_offers(): void
+    {
+        $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
+        $payload['offers'] = array_fill(0, 10, $this->offer([
+            'id' => 'app-only',
+            'heading' => 'App only offer',
+            'description' => 'Note: App-pris 85,00 kr. | PLUS PRIS. GÆLDER KUN MED BILKA PLUS APPEN. 840-920 g. Pr. kg max. 101.19.',
+            'pricing' => ['price' => 85, 'currency' => 'DKK'],
+        ]));
+
+        $this->expectException(ScraperParseException::class);
+        $this->expectExceptionMessage('Bilka paper produced zero publishable offers.');
+
+        (new BilkaPaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_it_keeps_mixed_app_and_general_bilka_offers_when_structured_price_is_general(): void
+    {
+        $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
+        $payload['offers'] = array_fill(0, 10, $this->offer([
+            'id' => 'mixed-general',
+            'heading' => 'Bag-in-Box marked',
+            'description' => 'Note: App-pris 109,00 kr. | PLUS PRIS FRIT VALG. Pr. liter 36.33. GÆLDER KUN MED BILKA PLUS APPEN. FRIT VALG. 129. Italien. Pr. liter 43.-',
+            'pricing' => ['price' => 129, 'currency' => 'DKK'],
+            'quantity' => [
+                'unit' => ['symbol' => 'l'],
+                'size' => ['from' => 3, 'to' => 3],
+                'pieces' => ['from' => 1, 'to' => 1],
+            ],
+        ]));
+
+        $paper = (new BilkaPaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+        $offer = $paper->offers[0];
+        $normalized = (new OfferNormalizer)->normalize($offer);
+
+        $this->assertFalse($offer->isConditional);
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $normalized->status);
+        $this->assertSame('43.00', $normalized->unitPrice?->decimal());
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function offer(array $overrides): array
+    {
+        return array_replace_recursive([
+            'id' => 'offer',
+            'heading' => 'Offer',
+            'description' => '500 g. Pr. kg 20.',
+            'catalog_page' => 1,
+            'pricing' => ['price' => 10, 'currency' => 'DKK'],
+            'quantity' => [
+                'unit' => ['symbol' => 'g'],
+                'size' => ['from' => 500, 'to' => 500],
+                'pieces' => ['from' => 1, 'to' => 1],
+            ],
+            'images' => ['zoom' => 'https://images.example/bilka.webp'],
+        ], $overrides);
     }
 
     private function fixture(): string

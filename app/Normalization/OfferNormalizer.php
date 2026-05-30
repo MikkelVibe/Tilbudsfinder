@@ -6,6 +6,7 @@ use App\Enums\NormalizationFailureSeverity;
 use App\Normalization\DTO\NormalizationIssue;
 use App\Normalization\DTO\NormalizedOffer;
 use App\Normalization\DTO\ParsedOfferInput;
+use App\Normalization\Enums\CompareUnit;
 use App\Normalization\Enums\NormalizationIssueCode;
 use App\Normalization\Enums\NormalizedOfferStatus;
 use App\Normalization\Exceptions\NormalizationParseException;
@@ -19,10 +20,9 @@ class OfferNormalizer
     private const UNIT_PRICE_MISMATCH_TOLERANCE = '0.05';
 
     public function __construct(
-        private readonly PriceParser $priceParser = new PriceParser(),
-        private readonly PackageQuantityParser $packageQuantityParser = new PackageQuantityParser(),
-    ) {
-    }
+        private readonly PriceParser $priceParser = new PriceParser,
+        private readonly PackageQuantityParser $packageQuantityParser = new PackageQuantityParser,
+    ) {}
 
     public function normalize(ParsedOfferInput $input): NormalizedOffer
     {
@@ -52,8 +52,8 @@ class OfferNormalizer
             return $this->result($input, NormalizedOfferStatus::Rejected, null, null, null, null, null, null, 0, $issues);
         }
 
-        $sourceUnitPrice = $this->parseSourceUnitPrice($input, $issues);
         $quantity = $this->parsePackageQuantity($input, $issues);
+        $sourceUnitPrice = $this->parseSourceUnitPrice($input, $quantity?->compareUnit(), $issues);
         $calculatedUnitPrice = $quantity ? $this->calculateUnitPrice($price, $quantity) : null;
         $chosenUnitPrice = $calculatedUnitPrice ?? $sourceUnitPrice;
         $confidence = $this->confidence($quantity, $sourceUnitPrice, $calculatedUnitPrice);
@@ -80,16 +80,18 @@ class OfferNormalizer
     }
 
     /**
-     * @param list<NormalizationIssue> $issues
+     * @param  list<NormalizationIssue>  $issues
      */
-    private function parseSourceUnitPrice(ParsedOfferInput $input, array &$issues): ?Money
+    private function parseSourceUnitPrice(ParsedOfferInput $input, ?CompareUnit $compareUnit, array &$issues): ?Money
     {
-        if ($input->sourceUnitPrice === null) {
+        $sourceUnitPrice = $input->sourceUnitPrice ?? $this->sourceUnitPriceFromText($input->sourceUnitPriceText, $compareUnit);
+
+        if ($sourceUnitPrice === null) {
             return null;
         }
 
         try {
-            return $this->priceParser->parse($input->sourceUnitPrice);
+            return $this->priceParser->parse($sourceUnitPrice);
         } catch (NormalizationParseException $exception) {
             $issues[] = new NormalizationIssue(
                 NormalizationIssueCode::PriceInvalid,
@@ -102,8 +104,39 @@ class OfferNormalizer
         }
     }
 
+    private function sourceUnitPriceFromText(?string $text, ?CompareUnit $compareUnit): ?string
+    {
+        if ($text === null || $compareUnit === null) {
+            return null;
+        }
+
+        preg_match_all('/Pr\.\s*(?<unit>liter|ltr\.?|l\.?|kg|kilo|stk\.?)\s*(?:max\.\s*)?(?<price>\d+(?:[,.]\d+)?|-)/iu', $text, $matches, PREG_SET_ORDER);
+
+        $matchingPrices = [];
+
+        foreach ($matches as $match) {
+            if ($match['price'] === '-' || $this->compareUnitForSourceUnit($match['unit']) !== $compareUnit) {
+                continue;
+            }
+
+            $matchingPrices[] = $match['price'];
+        }
+
+        return $matchingPrices === [] ? null : end($matchingPrices);
+    }
+
+    private function compareUnitForSourceUnit(string $unit): ?CompareUnit
+    {
+        return match (mb_strtolower(rtrim($unit, '.'))) {
+            'kg', 'kilo' => CompareUnit::Kilogram,
+            'liter', 'ltr', 'l' => CompareUnit::Liter,
+            'stk' => CompareUnit::Piece,
+            default => null,
+        };
+    }
+
     /**
-     * @param list<NormalizationIssue> $issues
+     * @param  list<NormalizationIssue>  $issues
      */
     private function parsePackageQuantity(ParsedOfferInput $input, array &$issues): ?PackageQuantity
     {
@@ -162,7 +195,7 @@ class OfferNormalizer
     }
 
     /**
-     * @param list<NormalizationIssue> $issues
+     * @param  list<NormalizationIssue>  $issues
      */
     private function status(array $issues, ?PackageQuantity $quantity, ?Money $unitPrice): NormalizedOfferStatus
     {
@@ -176,7 +209,7 @@ class OfferNormalizer
     }
 
     /**
-     * @param list<NormalizationIssue> $issues
+     * @param  list<NormalizationIssue>  $issues
      */
     private function result(
         ParsedOfferInput $input,

@@ -7,14 +7,15 @@ use InvalidArgumentException;
 readonly class ParsedOfferInput
 {
     /**
-     * @param array<string, mixed> $metadata
-     * @param array<string, mixed>|null $sourcePayload
+     * @param  array<string, mixed>  $metadata
+     * @param  array<string, mixed>|null  $sourcePayload
      */
     public function __construct(
         public string $title,
         public string|int|float|null $price,
         public ?string $packageText = null,
         public string|int|float|null $sourceUnitPrice = null,
+        public ?string $sourceUnitPriceText = null,
         public ?string $description = null,
         public ?string $imageUrl = null,
         public ?string $sourceOfferId = null,
