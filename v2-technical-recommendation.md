@@ -67,6 +67,42 @@ The pipeline should separate:
 
 Do not let adapters directly write final public records. They should return structured parsed data, then the central pipeline decides what is valid.
 
+### Current Danish Grocer Source Map
+
+Fresh discovery should be treated as the source of truth for adapter planning. Do not rely on the old v1 scraper URLs or assumptions.
+
+| Grocer | Parent / group | Offer page | Source type | API/data quality | Difficulty | Adapter priority |
+| --- | --- | --- | --- | --- | --- | --- |
+| REMA 1000 | REMA 1000 Danmark / Reitan Retail | `https://rema1000.dk/avis` | Tjek/Squid catalog + offer JSON | Strong: paper ID, dates, offer count, titles, prices, quantity/unit fields, pages, images | Easy | 1 |
+| Netto | Salling Group | `https://www.netto.dk/netto-avisen/` | Tjek/Squid catalog + offer JSON | Strong: paper ID, dates, offer count, titles, prices, quantity/unit fields, pages, images | Easy | 2 |
+| SuperBrugsen | Coop Danmark | `https://superbrugsen.coop.dk/avis/` | Tjek/Squid catalog JSON + Incito layout tree | Good paper metadata; offers must be parsed from layout nodes/text | Medium | 3 |
+| Kvickly | Coop Danmark | `https://kvickly.coop.dk/avis/` | Tjek/Squid catalog JSON + Incito layout tree | Good paper metadata; offers must be parsed from layout nodes/text | Medium | 4 |
+| Brugsen / Dagli'Brugsen | Coop Danmark | `https://brugsen.coop.dk/avis/` | Tjek/Squid catalog JSON + Incito layout tree | Good paper metadata; offers must be parsed from layout nodes/text | Medium | 5 |
+| 365discount | Coop Danmark | `https://365discount.coop.dk/365avis/` | Tjek/Squid catalog JSON + Incito layout tree | Good paper metadata; offers must be parsed from layout nodes/text | Medium | 6 |
+| Lidl | Lidl / Schwarz Group | `https://www.lidl.dk/c/tilbudsavis/s10013730` | Schwarz leaflet API + product pages | Flyer API gives paper/pages/hotspots; product details require follow-up page/data extraction | Medium | 7 |
+| MENY | Dagrofa | `https://meny.dk/ugensavis` | iPaper enrichment JSON | Structured enrichments exist, but signed CDN URLs must be discovered per paper | Medium | 8 |
+| SPAR | Dagrofa | `https://spar.dk/ugensavis` | iPaper enrichment JSON | Structured enrichments exist, but signed CDN URLs must be discovered per paper | Medium | 9 |
+| Min Kobmand | Dagrofa | `https://minkobmand.dk/ugensavis` | iPaper enrichment JSON | Structured enrichments exist, but signed CDN URLs must be discovered per paper | Medium | 10 |
+| Fotex | Salling Group | `https://www.foetex.dk/foetex-avis/` | iPaper enrichment JSON + Algolia product lookup | Product links can resolve structured details, but not every flyer offer is guaranteed semantic | Medium | Later |
+| Bilka | Salling Group | `https://www.bilka.dk/bilkaavisen/` | iPaper enrichment JSON + Bilka/BilkaToGo lookup | Similar to Fotex, with extra grouped-product and BilkaToGo lookup complexity | Medium-hard | Later |
+| Lovbjerg | Lovbjerg Supermarked A/S | `https://loevbjerg.dk/tilbudsavis` | Not verified | Site/source needs a dedicated pass | Unknown | Later |
+| ABC Lavpris | ABC Lavpris | `https://www.abc-lavpris.dk/` | Store-specific offers | Likely local-store scoped; source contract needs discovery | Unknown | Later |
+| Let-Kob | Dagrofa | Not verified | Not verified | Domain/source discovery unresolved | Hard/unknown | Later |
+| nemlig.com | Dagrofa-owned online supermarket | `https://www.nemlig.com/tilbud` | Online product offers, not weekly paper | Useful later, but different from paper-based import flow | Different model | Defer |
+
+Initial adapter implementation should start with offer-level JSON sources before layout-tree or iPaper adapters. The recommended first adapter is REMA 1000, followed by Netto, because both prove the end-to-end parser contract without introducing OCR-like layout ambiguity.
+
+Known endpoint examples from discovery:
+
+- REMA catalog: `https://squid-api.tjek.com/v2/catalogs/{catalog_id}`
+- REMA offers: `https://squid-api.tjek.com/v2/offers?catalog_id={catalog_id}`
+- Netto catalog list: `https://squid-api.tjek.com/v2/catalogs?dealer_id={dealer_id}&limit=3`
+- Tjek/Incito layout generation: `https://squid-api.tjek.com/v4/rpc/generate_incito_from_publication`
+- Lidl flyer API: `https://endpoints.leaflets.schwarz/v4/flyer?flyer_identifier={identifier}&region_id=0&region_code=0`
+- iPaper enrichments: signed `https://b-cdn.ipaper.io/iPaper/Papers/{paper_guid}/Enrichments/.../Page*.json?...` URLs discovered from the current paper page
+
+All discovered endpoints are public runtime endpoints, not formal vendor contracts. Adapter tests must use committed fixtures and live checks should be separate from the main test suite.
+
 ## Data Model Direction
 
 You want immutable-ish import history plus active public queries.
