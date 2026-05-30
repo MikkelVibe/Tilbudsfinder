@@ -1,0 +1,142 @@
+{
+  "catalog": {
+    "id": "Jrf1G_2x",
+    "label": "Bilka Food Uge 23 2026 - Fødevarer & Personlig Pleje",
+    "run_from": "2026-05-28T22:00:00+0000",
+    "run_till": "2026-06-04T21:59:59+0000",
+    "offer_count": 224,
+    "fetched_offer_count": 12,
+    "offer_count_mismatch": 212,
+    "page_count": 50,
+    "pdf_url": "https://squid-api.tjek.com/v2/catalogs/Jrf1G_2x/download",
+    "source_strategy": "tjek_food_weekly_catalog_offers",
+    "dealer_id": "93f13",
+    "dealer": {
+      "name": "Bilka"
+    }
+  },
+  "offers": [
+    {
+      "id": "offer-1",
+      "heading": "Cheasy skyr",
+      "description": "Note: Maks. 6 | Max. 6 stk. til denne pris. Frit valg. 1 kg. Flere varianter.",
+      "catalog_page": 36,
+      "pricing": {"price": 20, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "kg"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/skyr.webp"},
+      "catalog_id": "Jrf1G_2x",
+      "run_from": "2026-05-28T22:00:00+0000",
+      "run_till": "2026-06-04T21:59:59+0000"
+    },
+    {
+      "id": "offer-2",
+      "heading": "Coca-Cola sodavand",
+      "description": "Note: Maks. 12 | 1,5 liter. Flere varianter. Ekskl. embl. Pr. liter 7.33. FRIT VALG. MAX. 12 STK TIL DENNE PRIS.",
+      "catalog_page": 17,
+      "pricing": {"price": 11, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "l"}, "size": {"from": 1.5, "to": 1.5}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/cola.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-3",
+      "heading": "Gøl megakøbspølser eller Tulip spareribs",
+      "description": "Frit valg. 900 g. Flere varianter. Pr. kg max. 83.33.",
+      "catalog_page": 10,
+      "pricing": {"price": 75, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 900, "to": 900}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/poelser.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-4",
+      "heading": "Monster Energy eller Coca-Cola sodavand",
+      "description": "Ikke egnet til børn. 4x50 cl. ds. Monster Energy eller 4x1,25 Coca-cola regular eller zero. Gælder kun lukkede forpakninger. Ekskl. embl. Pr. liter max. 25.- Frit valg.",
+      "catalog_page": 31,
+      "pricing": {"price": 50, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "cl"}, "size": {"from": 50, "to": 50}, "pieces": {"from": 4, "to": 4}},
+      "images": {"zoom": "https://images.example/bilka/energy.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-5",
+      "heading": "Libero bleer",
+      "description": "PR. KASSE. 60 stk. Up&Go eller Comfort. Flere størrelser. Pr. stk. max. 2.59.",
+      "catalog_page": 8,
+      "pricing": {"price": 155, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "pcs"}, "size": {"from": 60, "to": 60}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/bleer.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-6",
+      "heading": "Kyllingebrystfilet",
+      "description": "450 g. Pr. kg 66,67.",
+      "catalog_page": 20,
+      "pricing": {"price": 30, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 450, "to": 450}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/kylling.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-7",
+      "heading": "Pasta",
+      "description": "500 g. Pr. kg 20,00.",
+      "catalog_page": 21,
+      "pricing": {"price": 10, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 500, "to": 500}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/pasta.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-8",
+      "heading": "Kaffe",
+      "description": "400 g. Pr. kg 62,50.",
+      "catalog_page": 22,
+      "pricing": {"price": 25, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 400, "to": 400}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/kaffe.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-9",
+      "heading": "Mælk",
+      "description": "1 liter. Pr. liter 10,00.",
+      "catalog_page": 23,
+      "pricing": {"price": 10, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "liter"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/maelk.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-10",
+      "heading": "Toiletpapir",
+      "description": "8 ruller. Pr. stk. 2,50.",
+      "catalog_page": 24,
+      "pricing": {"price": 20, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "stk"}, "size": {"from": 8, "to": 8}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/toiletpapir.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-11",
+      "heading": "Vindruer",
+      "description": "500 g. Pr. kg 30,00.",
+      "catalog_page": 25,
+      "pricing": {"price": 15, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "g"}, "size": {"from": 500, "to": 500}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/vindruer.webp"},
+      "catalog_id": "Jrf1G_2x"
+    },
+    {
+      "id": "offer-12",
+      "heading": "Æbler",
+      "description": "1 kg. Pr. kg 18,00.",
+      "catalog_page": 26,
+      "pricing": {"price": 18, "currency": "DKK"},
+      "quantity": {"unit": {"symbol": "kg"}, "size": {"from": 1, "to": 1}, "pieces": {"from": 1, "to": 1}},
+      "images": {"zoom": "https://images.example/bilka/aebler.webp"},
+      "catalog_id": "Jrf1G_2x"
+    }
+  ]
+}

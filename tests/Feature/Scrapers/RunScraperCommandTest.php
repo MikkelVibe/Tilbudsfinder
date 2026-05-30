@@ -75,6 +75,26 @@ class RunScraperCommandTest extends TestCase
         $this->assertSame(12, Paper::query()->withCount('scrapedOffers')->firstOrFail()->scraped_offers_count);
     }
 
+    public function test_it_runs_bilka_scraper_and_persists_active_papers(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        $this->fakeBilkaResponses();
+        Grocer::factory()->create(['slug' => 'bilka', 'name' => 'Bilka']);
+
+        $this->artisan('scraper:run bilka')
+            ->expectsOutput('Scraper [bilka] completed.')
+            ->expectsOutput('Fetched papers: 1')
+            ->expectsOutput('Imported papers: 1')
+            ->expectsOutput('Skipped duplicates: 0')
+            ->assertSuccessful();
+
+        $this->assertSame(1, ImportBatch::query()->count());
+        $this->assertSame(1, Paper::query()->count());
+        $this->assertSame(12, Paper::query()->withCount('scrapedOffers')->firstOrFail()->scraped_offers_count);
+    }
+
     public function test_it_skips_duplicate_rema_papers(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
@@ -152,6 +172,17 @@ class RunScraperCommandTest extends TestCase
                 $this->foetexCatalog('summer-beauty', 'Sommerskøn', 12),
             ]),
             'squid-api.tjek.com/v2/offers?catalog_id=weekly-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->foetexOffer($number), range(1, 12))),
+        ]);
+    }
+
+    private function fakeBilkaResponses(): void
+    {
+        Http::fake([
+            'squid-api.tjek.com/v2/catalogs*' => Http::response([
+                $this->bilkaCatalog('nonfood-paper', 'Bilka Nonfood Uge 23 2026 - Elektronik, Bolig, Have & Tekstil', 12),
+                $this->bilkaCatalog('food-paper', 'Bilka Food Uge 23 2026 - Fødevarer & Personlig Pleje', 12),
+            ]),
+            'squid-api.tjek.com/v2/offers?catalog_id=food-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->bilkaOffer($number), range(1, 12))),
         ]);
     }
 
@@ -279,6 +310,44 @@ class RunScraperCommandTest extends TestCase
             ],
             'images' => ['zoom' => "https://images.example/foetex/{$number}.webp"],
             'catalog_id' => 'weekly-paper',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function bilkaCatalog(string $id, string $label, int $offerCount): array
+    {
+        return [
+            'id' => $id,
+            'label' => $label,
+            'run_from' => '2026-05-28T22:00:00+0000',
+            'run_till' => '2026-06-04T21:59:59+0000',
+            'offer_count' => $offerCount,
+            'page_count' => 50,
+            'dealer_id' => '93f13',
+            'dealer' => ['name' => 'Bilka'],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function bilkaOffer(int $number): array
+    {
+        return [
+            'id' => "bilka-offer-{$number}",
+            'heading' => "Bilka Product {$number}",
+            'description' => '200 g. Pr. kg 50,00.',
+            'catalog_page' => $number,
+            'pricing' => ['price' => 10, 'currency' => 'DKK'],
+            'quantity' => [
+                'unit' => ['symbol' => 'g'],
+                'size' => ['from' => 200, 'to' => 200],
+                'pieces' => ['from' => 1, 'to' => 1],
+            ],
+            'images' => ['zoom' => "https://images.example/bilka/{$number}.webp"],
+            'catalog_id' => 'food-paper',
         ];
     }
 }

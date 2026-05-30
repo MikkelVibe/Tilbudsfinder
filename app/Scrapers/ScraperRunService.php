@@ -6,6 +6,7 @@ use App\Imports\Exceptions\DuplicatePaperImportException;
 use App\Imports\ImportPersistencePipeline;
 use App\Models\Grocer;
 use App\Models\ScrapeJob;
+use App\Scrapers\Bilka\BilkaScraper;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
 use App\Scrapers\Foetex\FoetexScraper;
@@ -59,6 +60,7 @@ class ScraperRunService
     private function scraper(string $grocerKey, bool $sleepBetweenDetailRequests): GrocerScraper
     {
         return match ($grocerKey) {
+            'bilka' => new BilkaScraper,
             'foetex' => new FoetexScraper,
             'netto' => new NettoScraper,
             'rema1000' => new Rema1000Scraper(sleepBetweenDetailRequests: $sleepBetweenDetailRequests),
