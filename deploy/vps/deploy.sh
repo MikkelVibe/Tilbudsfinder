@@ -58,5 +58,5 @@ if docker compose ps --status running postgres | grep -q postgres; then
 fi
 
 docker compose run --rm app php artisan migrate --force --no-interaction
-docker compose up -d app web queue scheduler
+docker compose up -d --force-recreate app web queue scheduler
 docker compose ps
