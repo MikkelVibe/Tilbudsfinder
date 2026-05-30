@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for Tilbudsfinder scraper agent image updates every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

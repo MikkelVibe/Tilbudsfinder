@@ -1,0 +1,11 @@
+[Unit]
+Description=Update Tilbudsfinder scraper agent image
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/tilbudsfinder-agent
+Environment=AGENT_DIR=%h/tilbudsfinder-agent
+ExecStart=%h/tilbudsfinder-agent/update-scraper-agent.sh
+TimeoutStartSec=30min
