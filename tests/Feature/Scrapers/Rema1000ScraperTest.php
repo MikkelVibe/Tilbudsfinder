@@ -3,14 +3,8 @@
 namespace Tests\Feature\Scrapers;
 
 use App\Scrapers\Exceptions\ScraperFetchException;
-use App\Scrapers\Rema1000\Rema1000AvisvareSource;
-use App\Scrapers\Rema1000\Rema1000CatalogSource;
-use App\Scrapers\Rema1000\Rema1000OfferGrouper;
-use App\Scrapers\Rema1000\Rema1000PaperMapper;
-use App\Scrapers\Rema1000\Rema1000ProductDetailSource;
 use App\Scrapers\Rema1000\Rema1000Scraper;
 use Carbon\CarbonImmutable;
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -32,32 +26,28 @@ class Rema1000ScraperTest extends TestCase
                 $this->algoliaProduct(61251, 'STORE HOTDOGBRØD', '360 GR. / REMA 1000'),
                 $this->algoliaProduct(404995, 'KYLLINGEBRYSTFILET', '450 GR. / DANSK'),
                 $this->algoliaProduct(170209, 'TOILETPAPIR', '684 GR. / REMA 1000'),
-                ...array_map(fn (int $id): array => $this->algoliaProduct($id, "UGEVARE {$id}", '200 GR. / REMA 1000'), range(70001, 70008)),
-                ...array_map(fn (int $id): array => $this->algoliaProduct($id, "INDSTIKSVARE {$id}", '200 GR. / REMA 1000'), range(80001, 80009)),
             ])),
             'api.digital.rema1000.dk/api/v3/products/60055?*' => Http::response(['data' => $this->productDetail(60055, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
             'api.digital.rema1000.dk/api/v3/products/61251?*' => Http::response(['data' => $this->productDetail(61251, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
             'api.digital.rema1000.dk/api/v3/products/404995?*' => Http::response(['data' => $this->productDetail(404995, '2026-05-26T00:00:00+00:00', '2026-06-13T00:00:00+00:00')]),
             'api.digital.rema1000.dk/api/v3/products/170209?*' => Http::response(['data' => $this->productDetail(170209, '2026-05-27T23:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
-            ...$this->detailResponses(range(70001, 70008), '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00'),
-            ...$this->detailResponses(range(80001, 80009), '2026-05-27T23:00:00+00:00', '2026-05-30T00:00:00+00:00'),
         ]);
 
-        $papers = $this->scraperWithoutDelay()->fetchPapers();
+        $payloads = (new Rema1000Scraper(sleepBetweenDetailRequests: false))->fetchPapers();
 
-        $this->assertCount(2, $papers);
-        $this->assertSame('weekly-paper', $papers[0]->sourceExternalId);
-        $this->assertSame('insert-paper', $papers[1]->sourceExternalId);
+        $this->assertCount(2, $payloads);
+        $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
+        $this->assertSame('insert-paper', $payloads[1]->sourceExternalId);
 
-        $weeklyPayload = json_decode($papers[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
-        $insertPayload = json_decode($papers[1]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+        $weeklyPayload = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+        $insertPayload = json_decode($payloads[1]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
 
         $this->assertSame('algolia_product_details_grouped_by_tjek_overlap', $weeklyPayload['catalog']['source_strategy']);
-        $this->assertSame(11, $weeklyPayload['catalog']['fetched_product_offer_count']);
-        $this->assertSame(10, $insertPayload['catalog']['fetched_product_offer_count']);
-        $this->assertSame('LIMPAN', $papers[0]->offers[0]->title);
-        $this->assertSame('TOILETPAPIR', $papers[1]->offers[0]->title);
-        $this->assertFalse(collect($papers)->contains(fn ($paper): bool => $paper->sourceExternalId === 'permanent-prices'));
+        $this->assertSame(2, $weeklyPayload['catalog']['fetched_product_offer_count']);
+        $this->assertSame(1, $insertPayload['catalog']['fetched_product_offer_count']);
+        $this->assertSame('LIMPAN', $weeklyPayload['offers'][0]['algolia']['name']);
+        $this->assertSame('TOILETPAPIR', $insertPayload['offers'][0]['algolia']['name']);
+        $this->assertFalse(collect($payloads)->contains(fn ($payload): bool => $payload->sourceExternalId === 'permanent-prices'));
     }
 
     public function test_it_fails_when_product_detail_coverage_is_too_low(): void
@@ -75,20 +65,9 @@ class Rema1000ScraperTest extends TestCase
         ]);
 
         $this->expectException(ScraperFetchException::class);
-        $this->expectExceptionMessage('REMA 1000 product detail request failed for product [60055] with upstream server error.');
+        $this->expectExceptionMessage('REMA 1000 product detail coverage was 0%, below 95%.');
 
-        $this->scraperWithoutDelay()->fetchPapers();
-    }
-
-    private function scraperWithoutDelay(): Rema1000Scraper
-    {
-        return new Rema1000Scraper(
-            mapper: $this->app->make(Rema1000PaperMapper::class),
-            catalogs: new Rema1000CatalogSource,
-            avisvarer: new Rema1000AvisvareSource,
-            details: new Rema1000ProductDetailSource(delayRequests: false),
-            grouper: new Rema1000OfferGrouper,
-        );
+        (new Rema1000Scraper(sleepBetweenDetailRequests: false))->fetchPapers();
     }
 
     /**
@@ -163,20 +142,5 @@ class Rema1000ScraperTest extends TestCase
                 'max_quantity' => 6,
             ]],
         ];
-    }
-
-    /**
-     * @param  list<int>  $ids
-     * @return array<string, Response>
-     */
-    private function detailResponses(array $ids, string $startsAt, string $endsAt): array
-    {
-        $responses = [];
-
-        foreach ($ids as $id) {
-            $responses["api.digital.rema1000.dk/api/v3/products/{$id}?*"] = Http::response(['data' => $this->productDetail($id, $startsAt, $endsAt)]);
-        }
-
-        return $responses;
     }
 }

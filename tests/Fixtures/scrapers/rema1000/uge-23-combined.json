@@ -1,0 +1,139 @@
+{
+  "catalog": {
+    "id": "zLEWCiXQ",
+    "label": "Uge 23",
+    "run_from": "2026-05-30T22:00:00+0000",
+    "run_till": "2026-06-06T21:59:59+0000",
+    "page_count": 28,
+    "offer_count": 147,
+    "fetched_offer_count": 12,
+    "offer_count_mismatch": 135,
+    "dealer_id": "11deC",
+    "dealer": {
+      "name": "REMA 1000"
+    },
+    "pdf_url": "https://squid-api.tjek.com/v2/catalogs/zLEWCiXQ/download"
+  },
+  "offers": [
+    {
+      "id": "T1Bq355irBak7AIMndG2s",
+      "heading": "REMA 1000 Limonadeis",
+      "description": "80-83 ml. Max. 62.50 pr. liter. Vores danske isklassikere er produceret i Thisted på frisk fløde eller limonade",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 11,
+      "pricing": { "price": 5, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "ml", "si": { "symbol": "l", "factor": 0.001 } }, "size": { "from": 80, "to": 83 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/limonadeis-thumb.webp", "view": "https://images.example/rema/limonadeis-view.webp", "zoom": "https://images.example/rema/limonadeis-zoom.webp" }
+    },
+    {
+      "id": "NY76xyQDLvPb56qvYKact",
+      "heading": "Peter Larsen Kaffe, Lavazza, Merrild kaffe eller Merrild instant",
+      "description": "Note: Maks. 6 | 100-400 g Max. 390.00 pr. kg Ved køb af flere end 6 stk. pr. variant pr. dag er prisen op til 65.00 pr. stk.",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 27,
+      "pricing": { "price": 39, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "g", "si": { "symbol": "kg", "factor": 0.001 } }, "size": { "from": 100, "to": 400 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/kaffe-thumb.webp", "view": "https://images.example/rema/kaffe-view.webp", "zoom": "https://images.example/rema/kaffe-zoom.webp" }
+    },
+    {
+      "id": "s2qts2yKJVUEopNuYfTs5",
+      "heading": "Premier Is eller Magnum iskasse",
+      "description": "270-445 ml. Partivare. Max. 92.59 pr. liter",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 28,
+      "pricing": { "price": 25, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "ml", "si": { "symbol": "l", "factor": 0.001 } }, "size": { "from": 270, "to": 445 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/iskasse-thumb.webp", "view": "https://images.example/rema/iskasse-view.webp", "zoom": "https://images.example/rema/iskasse-zoom.webp" }
+    },
+    {
+      "id": "IL50sUKQocj-efUeh-jND",
+      "heading": "Grillpølser",
+      "description": "200 g. 50.00 pr. kg",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 6,
+      "pricing": { "price": 10, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "g", "si": { "symbol": "kg", "factor": 0.001 } }, "size": { "from": 200, "to": 200 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/grillpoelser-thumb.webp", "view": "https://images.example/rema/grillpoelser-view.webp", "zoom": "https://images.example/rema/grillpoelser-zoom.webp" }
+    },
+    {
+      "id": "H9aI1imOeW7tphC7UXiX6",
+      "heading": "Spiritus eller likør",
+      "description": "50-70 cl Max. 198.00 pr. liter",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 24,
+      "pricing": { "price": 99, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "cl", "si": { "symbol": "l", "factor": 0.01 } }, "size": { "from": 50, "to": 70 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/spiritus-thumb.webp", "view": "https://images.example/rema/spiritus-view.webp", "zoom": "https://images.example/rema/spiritus-zoom.webp" }
+    },
+    {
+      "id": "FYq4fGNCp714FU9KyKjEB",
+      "heading": "Coca-Cola eller Fanta",
+      "description": "Note: Maks. 72 | 33 cl. Ex. pant Ved køb af flere end 72 stk. pr. variant pr. dag er prisen op til 5.95 pr. stk. Kasse med 24 stk. 84.00/10.61 pr. liter",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 14,
+      "pricing": { "price": 3.5, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "cl", "si": { "symbol": "l", "factor": 0.01 } }, "size": { "from": 33, "to": 33 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/sodavand-thumb.webp", "view": "https://images.example/rema/sodavand-view.webp", "zoom": "https://images.example/rema/sodavand-zoom.webp" }
+    },
+    {
+      "id": "FoSxt4dnMbvHmjGUPS7IH",
+      "heading": "REMA 1000 Bologna Italiensk is",
+      "description": "500 ml. Partivare. 40.00 pr. liter",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 15,
+      "pricing": { "price": 20, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "ml", "si": { "symbol": "l", "factor": 0.001 } }, "size": { "from": 500, "to": 500 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/bologna-is-thumb.webp", "view": "https://images.example/rema/bologna-is-view.webp", "zoom": "https://images.example/rema/bologna-is-zoom.webp" }
+    },
+    {
+      "id": "s3Ow7wzRqsPnrAw3vgEHa",
+      "heading": "Kohberg brød",
+      "description": "Note: Maks. 6 | 380-1000 g Ved køb af flere end 6 stk. pr. variant pr. dag er prisen op til 25.95 pr. stk. Max. 36.84 pr. kg",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 24,
+      "pricing": { "price": 14, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "g", "si": { "symbol": "kg", "factor": 0.001 } }, "size": { "from": 380, "to": 1000 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/broed-thumb.webp", "view": "https://images.example/rema/broed-view.webp", "zoom": "https://images.example/rema/broed-zoom.webp" }
+    },
+    {
+      "id": "VDA7Ao-foTpc29LmRqlck",
+      "heading": "REMA 1000 Hakket dansk grise- og kalvekød, kyllingekød eller Frilandsgris grisekød",
+      "description": "400-500 g Max. 62.50 pr. kg",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 24,
+      "pricing": { "price": 25, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "g", "si": { "symbol": "kg", "factor": 0.001 } }, "size": { "from": 400, "to": 500 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/hakket-koed-thumb.webp", "view": "https://images.example/rema/hakket-koed-view.webp", "zoom": "https://images.example/rema/hakket-koed-zoom.webp" }
+    },
+    {
+      "id": "JNvJNOkB6uRYx6qJKN82R",
+      "heading": "REMA 1000 dressing, BBQ, sauce eller mayo",
+      "description": "210-430 g Max. 57.14 pr. kg",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 13,
+      "pricing": { "price": 12, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "g", "si": { "symbol": "kg", "factor": 0.001 } }, "size": { "from": 210, "to": 430 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/dressing-thumb.webp", "view": "https://images.example/rema/dressing-view.webp", "zoom": "https://images.example/rema/dressing-zoom.webp" }
+    },
+    {
+      "id": "5dwcriehWOAnsixUhGRoM",
+      "heading": "REMA 1000 Hele bønner",
+      "description": "Note: Maks. 6 | 1 kg. Ved køb af flere end 6 stk. pr. variant pr. dag er prisen 139.95 pr. stk.",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 19,
+      "pricing": { "price": 119, "pre_price": 139.95, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "kg", "si": { "symbol": "kg", "factor": 1 } }, "size": { "from": 1, "to": 1 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/boenner-thumb.webp", "view": "https://images.example/rema/boenner-view.webp", "zoom": "https://images.example/rema/boenner-zoom.webp" }
+    },
+    {
+      "id": "srtTRFKF240gvzktZ7yoO",
+      "heading": "Steff Houlberg Pølser",
+      "description": "Note: Maks. 6 | 350-450 g. Ved køb af flere end 6 stk. pr. variant pr. dag er prisen op til 29.95 pr. stk. Max. 57.14 pr. kg",
+      "catalog_id": "zLEWCiXQ",
+      "catalog_page": 1,
+      "pricing": { "price": 20, "pre_price": null, "currency": "DKK" },
+      "quantity": { "unit": { "symbol": "g", "si": { "symbol": "kg", "factor": 0.001 } }, "size": { "from": 350, "to": 450 }, "pieces": { "from": 1, "to": 1 } },
+      "images": { "thumb": "https://images.example/rema/poelser-thumb.webp", "view": "https://images.example/rema/poelser-view.webp", "zoom": "https://images.example/rema/poelser-zoom.webp" }
+    }
+  ]
+}

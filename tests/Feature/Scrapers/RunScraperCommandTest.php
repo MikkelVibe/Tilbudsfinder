@@ -5,13 +5,6 @@ namespace Tests\Feature\Scrapers;
 use App\Models\Grocer;
 use App\Models\ImportBatch;
 use App\Models\Paper;
-use App\Scrapers\Rema1000\Rema1000AvisvareSource;
-use App\Scrapers\Rema1000\Rema1000CatalogSource;
-use App\Scrapers\Rema1000\Rema1000OfferGrouper;
-use App\Scrapers\Rema1000\Rema1000PaperMapper;
-use App\Scrapers\Rema1000\Rema1000ProductDetailSource;
-use App\Scrapers\Rema1000\Rema1000Scraper;
-use App\Scrapers\ScraperRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -27,11 +20,10 @@ class RunScraperCommandTest extends TestCase
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
         Storage::fake('local');
         Http::preventStrayRequests();
-        $this->withoutRemaDetailDelay();
         $this->fakeRemaResponses(['weekly-paper' => range(1, 10), 'active-insert' => range(11, 20)]);
         Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
 
-        $this->artisan('scraper:run rema1000')
+        $this->artisan('scraper:run rema1000 --no-delay')
             ->expectsOutput('Scraper [rema1000] completed.')
             ->expectsOutput('Fetched papers: 2')
             ->expectsOutput('Imported papers: 2')
@@ -48,15 +40,14 @@ class RunScraperCommandTest extends TestCase
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
         Storage::fake('local');
         Http::preventStrayRequests();
-        $this->withoutRemaDetailDelay();
         $this->fakeRemaResponses(['weekly-paper' => range(1, 10)]);
         Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
 
-        $this->artisan('scraper:run rema1000')->assertSuccessful();
+        $this->artisan('scraper:run rema1000 --no-delay')->assertSuccessful();
 
         $this->fakeRemaResponses(['weekly-paper' => range(1, 10)]);
 
-        $this->artisan('scraper:run rema1000')
+        $this->artisan('scraper:run rema1000 --no-delay')
             ->expectsOutput('Fetched papers: 1')
             ->expectsOutput('Imported papers: 0')
             ->expectsOutput('Skipped duplicates: 1')
@@ -64,19 +55,6 @@ class RunScraperCommandTest extends TestCase
 
         $this->assertSame(1, ImportBatch::query()->count());
         $this->assertSame(1, Paper::query()->count());
-    }
-
-    private function withoutRemaDetailDelay(): void
-    {
-        $this->app->instance(ScraperRegistry::class, new ScraperRegistry([
-            new Rema1000Scraper(
-                mapper: $this->app->make(Rema1000PaperMapper::class),
-                catalogs: new Rema1000CatalogSource,
-                avisvarer: new Rema1000AvisvareSource,
-                details: new Rema1000ProductDetailSource(delayRequests: false),
-                grouper: new Rema1000OfferGrouper,
-            ),
-        ]));
     }
 
     public function test_it_fails_when_rema_grocer_row_is_missing(): void

@@ -5,56 +5,61 @@ namespace App\Scrapers;
 use App\Imports\Exceptions\DuplicatePaperImportException;
 use App\Imports\ImportPersistencePipeline;
 use App\Models\Grocer;
-use App\Scrapers\DTO\ScraperPaperRunResult;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
-use Throwable;
+use App\Scrapers\Rema1000\Rema1000Scraper;
 
 class ScraperRunService
 {
     public function __construct(
-        private readonly ImportPersistencePipeline $pipeline,
-        private readonly ScraperRegistry $scrapers,
+        private readonly ImportPersistencePipeline $pipeline = new ImportPersistencePipeline,
     ) {}
 
-    public function run(string $grocerKey): ScraperRunResult
+    public function run(string $grocerKey, ?int $limit = null, bool $sleepBetweenDetailRequests = true, ?callable $progress = null): ScraperRunResult
     {
-        $scraper = $this->scrapers->get($grocerKey);
+        $scraper = $this->scraper($grocerKey, $sleepBetweenDetailRequests);
         $grocer = Grocer::query()->where('slug', $scraper->grocerKey())->first();
 
         if (! $grocer) {
             throw new ScraperRunException("Grocer [{$scraper->grocerKey()}] does not exist.");
         }
 
-        $papers = $scraper->fetchPapers();
+        $payloads = $scraper->fetchPapers($limit, $progress);
         $importedCount = 0;
         $skippedDuplicateCount = 0;
-        $failedCount = 0;
-        $paperResults = [];
 
-        foreach ($papers as $paper) {
+        foreach ($payloads as $payload) {
             try {
-                $this->pipeline->persist($grocer, $paper);
+                $this->progress($progress, "Importing paper {$payload->sourceExternalId} ({$payload->title})...");
+                $this->pipeline->persist($grocer, $scraper->parse($payload));
                 $importedCount++;
-                $paperResults[] = ScraperPaperRunResult::imported($paper->sourceExternalId);
+                $this->progress($progress, "Imported paper {$payload->sourceExternalId}.");
             } catch (DuplicatePaperImportException) {
                 $skippedDuplicateCount++;
-                $paperResults[] = ScraperPaperRunResult::duplicate($paper->sourceExternalId);
-            } catch (Throwable $exception) {
-                report($exception);
-
-                $failedCount++;
-                $paperResults[] = ScraperPaperRunResult::failed($paper->sourceExternalId, $exception->getMessage());
+                $this->progress($progress, "Skipped duplicate paper {$payload->sourceExternalId}.");
             }
         }
 
         return new ScraperRunResult(
             grocerKey: $scraper->grocerKey(),
-            fetchedPaperCount: count($papers),
+            fetchedPaperCount: count($payloads),
             importedPaperCount: $importedCount,
             skippedDuplicateCount: $skippedDuplicateCount,
-            failedPaperCount: $failedCount,
-            papers: $paperResults,
         );
+    }
+
+    private function scraper(string $grocerKey, bool $sleepBetweenDetailRequests): GrocerScraper
+    {
+        return match ($grocerKey) {
+            'rema1000' => new Rema1000Scraper(sleepBetweenDetailRequests: $sleepBetweenDetailRequests),
+            default => throw new ScraperRunException("Scraper [{$grocerKey}] is not supported."),
+        };
+    }
+
+    private function progress(?callable $progress, string $message): void
+    {
+        if ($progress !== null) {
+            $progress($message);
+        }
     }
 }

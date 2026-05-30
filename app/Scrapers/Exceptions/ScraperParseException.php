@@ -2,4 +2,6 @@
 
 namespace App\Scrapers\Exceptions;
 
-class ScraperParseException extends ScraperException {}
+use RuntimeException;
+
+class ScraperParseException extends RuntimeException {}
