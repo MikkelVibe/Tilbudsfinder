@@ -44,13 +44,13 @@ class PackageQuantityParserTest extends TestCase
         $this->assertTrue($quantity->assumedAmount);
     }
 
-    public function test_it_uses_average_amount_for_ranges(): void
+    public function test_it_uses_smallest_amount_for_ranges(): void
     {
         $quantity = (new PackageQuantityParser)->parse('500-750 g');
 
         $this->assertSame(PackageUnit::Gram, $quantity->unit);
-        $this->assertSame('625.000000', (string) $quantity->amount);
-        $this->assertSame('0.625000', (string) $quantity->normalizedAmount());
+        $this->assertSame('500', (string) $quantity->amount);
+        $this->assertSame('0.500000', (string) $quantity->normalizedAmount());
         $this->assertFalse($quantity->assumedAmount);
     }
 

@@ -61,9 +61,7 @@ class PackageQuantityParser
             return null;
         }
 
-        $amount = $this->decimal($matches['from'])
-            ->plus($this->decimal($matches['to']))
-            ->dividedBy('2', 6);
+        $amount = $this->decimal($matches['from']);
 
         return new PackageQuantity($amount, $unit, $matches['unit']);
     }

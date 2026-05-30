@@ -126,7 +126,7 @@ class OfferNormalizerTest extends TestCase
         $this->assertSame(49, $offer->confidence);
     }
 
-    public function test_it_uses_average_package_amount_for_ranges(): void
+    public function test_it_uses_smallest_package_amount_for_ranges(): void
     {
         $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
             title: 'Shampoo',
@@ -136,9 +136,9 @@ class OfferNormalizerTest extends TestCase
 
         $this->assertSame(NormalizedOfferStatus::Succeeded, $offer->status);
         $this->assertSame(PackageUnit::Milliliter, $offer->packageUnit);
-        $this->assertSame('225.000000', (string) $offer->packageAmount);
-        $this->assertSame('0.225000', (string) $offer->normalizedAmount);
-        $this->assertSame('306.67', $offer->unitPrice?->decimal());
+        $this->assertSame('150', (string) $offer->packageAmount);
+        $this->assertSame('0.150000', (string) $offer->normalizedAmount);
+        $this->assertSame('460.00', $offer->unitPrice?->decimal());
         $this->assertSame(95, $offer->confidence);
         $this->assertSame([], $offer->issues);
     }
