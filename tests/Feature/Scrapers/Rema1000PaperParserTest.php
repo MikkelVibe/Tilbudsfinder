@@ -56,13 +56,13 @@ class Rema1000PaperParserTest extends TestCase
         $this->assertSame(ImportBatchStatus::Succeeded, $batch->status);
         $this->assertSame(12, $batch->parsed_offer_count);
         $this->assertSame(12, $batch->published_offer_count);
-        $this->assertSame(8, $batch->normalization_failure_count);
+        $this->assertSame(0, $batch->normalization_failure_count);
         $this->assertTrue(Storage::disk('local')->exists($batch->raw_payload_path));
 
         $this->assertSame(1, ImportBatch::query()->count());
         $this->assertSame(1, Paper::query()->where('source_external_id', 'zLEWCiXQ')->count());
         $this->assertSame(12, ScrapedOffer::query()->count());
-        $this->assertSame(8, NormalizationFailure::query()->count());
+        $this->assertSame(0, NormalizationFailure::query()->count());
 
         $grillSausages = ScrapedOffer::query()->where('source_offer_id', 'IL50sUKQocj-efUeh-jND')->firstOrFail();
 

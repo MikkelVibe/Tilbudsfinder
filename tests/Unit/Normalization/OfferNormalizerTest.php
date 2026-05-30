@@ -14,7 +14,7 @@ class OfferNormalizerTest extends TestCase
 {
     public function test_it_normalizes_an_unambiguous_weight_offer(): void
     {
-        $offer = (new OfferNormalizer())->normalize(new ParsedOfferInput(
+        $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
             title: '  Arla   smør  ',
             price: '14,95',
             packageText: '500 g',
@@ -35,7 +35,7 @@ class OfferNormalizerTest extends TestCase
 
     public function test_it_normalizes_volume_and_count_unit_prices(): void
     {
-        $normalizer = new OfferNormalizer();
+        $normalizer = new OfferNormalizer;
 
         $soda = $normalizer->normalize(new ParsedOfferInput(
             title: 'Sodavand',
@@ -59,7 +59,7 @@ class OfferNormalizerTest extends TestCase
 
     public function test_it_partial_publishes_when_package_cannot_be_parsed(): void
     {
-        $offer = (new OfferNormalizer())->normalize(new ParsedOfferInput(
+        $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
             title: 'Mystery product',
             price: '20',
             packageText: 'ukendt størrelse',
@@ -73,7 +73,7 @@ class OfferNormalizerTest extends TestCase
 
     public function test_it_assumes_package_like_units_are_one_stk_with_lower_confidence(): void
     {
-        $offer = (new OfferNormalizer())->normalize(new ParsedOfferInput(
+        $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
             title: 'Tomater',
             price: '25',
             packageText: 'bakke',
@@ -88,7 +88,7 @@ class OfferNormalizerTest extends TestCase
 
     public function test_it_rejects_conditional_and_invalid_price_offers(): void
     {
-        $normalizer = new OfferNormalizer();
+        $normalizer = new OfferNormalizer;
 
         $conditional = $normalizer->normalize(new ParsedOfferInput(
             title: 'App tilbud',
@@ -111,7 +111,7 @@ class OfferNormalizerTest extends TestCase
 
     public function test_it_warns_and_removes_unit_price_when_source_and_calculated_unit_prices_disagree(): void
     {
-        $offer = (new OfferNormalizer())->normalize(new ParsedOfferInput(
+        $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
             title: 'Smør',
             price: '14,95',
             packageText: '500 g',
@@ -124,5 +124,22 @@ class OfferNormalizerTest extends TestCase
         $this->assertSame('19.95', $offer->sourceUnitPrice?->decimal());
         $this->assertSame(NormalizationIssueCode::UnitPriceMismatch, $offer->issues[0]->code);
         $this->assertSame(49, $offer->confidence);
+    }
+
+    public function test_it_uses_average_package_amount_for_ranges(): void
+    {
+        $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
+            title: 'Shampoo',
+            price: '69',
+            packageText: '150-300 ml',
+        ));
+
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $offer->status);
+        $this->assertSame(PackageUnit::Milliliter, $offer->packageUnit);
+        $this->assertSame('225.000000', (string) $offer->packageAmount);
+        $this->assertSame('0.225000', (string) $offer->normalizedAmount);
+        $this->assertSame('306.67', $offer->unitPrice?->decimal());
+        $this->assertSame(95, $offer->confidence);
+        $this->assertSame([], $offer->issues);
     }
 }

@@ -34,6 +34,7 @@ class UnitAliasMap
         'stk.' => PackageUnit::Piece,
         'styk' => PackageUnit::Piece,
         'stykker' => PackageUnit::Piece,
+        'pcs' => PackageUnit::Piece,
         'piece' => PackageUnit::Piece,
         'pieces' => PackageUnit::Piece,
         'pk' => PackageUnit::Package,

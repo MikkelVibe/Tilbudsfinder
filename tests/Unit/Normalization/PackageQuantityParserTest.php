@@ -4,7 +4,6 @@ namespace Tests\Unit\Normalization;
 
 use App\Normalization\Enums\CompareUnit;
 use App\Normalization\Enums\PackageUnit;
-use App\Normalization\Exceptions\NormalizationParseException;
 use App\Normalization\PackageQuantityParser;
 use PHPUnit\Framework\TestCase;
 
@@ -12,7 +11,7 @@ class PackageQuantityParserTest extends TestCase
 {
     public function test_it_parses_weight_volume_count_and_multiplier_quantities(): void
     {
-        $parser = new PackageQuantityParser();
+        $parser = new PackageQuantityParser;
 
         $weight = $parser->parse('500GR.');
         $volume = $parser->parse('1,5 LTR.');
@@ -37,7 +36,7 @@ class PackageQuantityParserTest extends TestCase
 
     public function test_it_assumes_one_for_package_like_units_without_count(): void
     {
-        $quantity = (new PackageQuantityParser())->parse('pakke');
+        $quantity = (new PackageQuantityParser)->parse('pakke');
 
         $this->assertSame(PackageUnit::Package, $quantity->unit);
         $this->assertSame(CompareUnit::Piece, $quantity->compareUnit());
@@ -45,10 +44,36 @@ class PackageQuantityParserTest extends TestCase
         $this->assertTrue($quantity->assumedAmount);
     }
 
-    public function test_it_rejects_amount_ranges(): void
+    public function test_it_uses_average_amount_for_ranges(): void
     {
-        $this->expectException(NormalizationParseException::class);
+        $quantity = (new PackageQuantityParser)->parse('500-750 g');
 
-        (new PackageQuantityParser())->parse('500-750 g');
+        $this->assertSame(PackageUnit::Gram, $quantity->unit);
+        $this->assertSame('625.000000', (string) $quantity->amount);
+        $this->assertSame('0.625000', (string) $quantity->normalizedAmount());
+        $this->assertFalse($quantity->assumedAmount);
+    }
+
+    public function test_it_accepts_pcs_as_piece_unit(): void
+    {
+        $quantity = (new PackageQuantityParser)->parse('1 pcs');
+
+        $this->assertSame(PackageUnit::Piece, $quantity->unit);
+        $this->assertSame(CompareUnit::Piece, $quantity->compareUnit());
+        $this->assertSame('1', (string) $quantity->normalizedAmount());
+    }
+
+    public function test_it_ignores_purchase_limits_before_package_quantities(): void
+    {
+        $parser = new PackageQuantityParser;
+
+        $skyr = $parser->parse('Note: Maks. 6 | Max. 6 stk. til denne pris. Frit valg. 1 kg. Flere varianter.');
+        $soda = $parser->parse('Note: Maks. 12 | 1,5 liter. Flere varianter. MAX. 12 STK TIL DENNE PRIS.');
+
+        $this->assertSame(PackageUnit::Kilogram, $skyr->unit);
+        $this->assertSame('1', (string) $skyr->normalizedAmount());
+
+        $this->assertSame(PackageUnit::Liter, $soda->unit);
+        $this->assertSame('1.5', (string) $soda->normalizedAmount());
     }
 }

@@ -10,20 +10,19 @@ use Brick\Math\BigDecimal;
 class PackageQuantityParser
 {
     public function __construct(
-        private readonly UnitAliasMap $unitAliasMap = new UnitAliasMap(),
-    ) {
-    }
+        private readonly UnitAliasMap $unitAliasMap = new UnitAliasMap,
+    ) {}
 
     public function parse(?string $text): PackageQuantity
     {
-        $text = trim((string) $text);
+        $text = $this->removePurchaseLimitPhrases(trim((string) $text));
 
         if ($text === '') {
             throw new NormalizationParseException('Package amount is missing.');
         }
 
-        if ($this->containsRange($text)) {
-            throw new NormalizationParseException('Package amount range cannot be normalized confidently.');
+        if ($quantity = $this->parseAmountRange($text)) {
+            return $quantity;
         }
 
         if ($quantity = $this->parseMultiplier($text)) {
@@ -41,11 +40,32 @@ class PackageQuantityParser
         throw new NormalizationParseException('Package unit is unknown.');
     }
 
-    private function containsRange(string $text): bool
+    private function removePurchaseLimitPhrases(string $text): string
+    {
+        $text = preg_replace('/\b(?:maks|max)\.\s*\d+(?:[,.]\d+)?\s*(?:stk\.?|styk|stykker)?\s*(?:til\s+denne\s+pris)?\b/iu', ' ', $text) ?? $text;
+
+        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+    }
+
+    private function parseAmountRange(string $text): ?PackageQuantity
     {
         $unitPattern = $this->unitAliasMap->unitPattern();
 
-        return preg_match('/\d+(?:[,.]\d+)?\s*(?:-|–)\s*\d+(?:[,.]\d+)?\s*(?:'.$unitPattern.')\b/iu', $text) === 1;
+        if (! preg_match('/(?<from>\d+(?:[,.]\d+)?)\s*(?:-|–)\s*(?<to>\d+(?:[,.]\d+)?)\s*(?<unit>'.$unitPattern.')\b/iu', $text, $matches)) {
+            return null;
+        }
+
+        $unit = $this->unitAliasMap->normalize($matches['unit']);
+
+        if (! $unit) {
+            return null;
+        }
+
+        $amount = $this->decimal($matches['from'])
+            ->plus($this->decimal($matches['to']))
+            ->dividedBy('2', 6);
+
+        return new PackageQuantity($amount, $unit, $matches['unit']);
     }
 
     private function parseMultiplier(string $text): ?PackageQuantity
