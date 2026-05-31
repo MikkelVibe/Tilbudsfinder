@@ -30,8 +30,10 @@ class UnitAliasMap
         'ltr.' => PackageUnit::Liter,
         'liter' => PackageUnit::Liter,
         'litr' => PackageUnit::Liter,
+        'lt' => PackageUnit::Liter,
         'stk' => PackageUnit::Piece,
         'stk.' => PackageUnit::Piece,
+        'st' => PackageUnit::Piece,
         'styk' => PackageUnit::Piece,
         'stykker' => PackageUnit::Piece,
         'pcs' => PackageUnit::Piece,
@@ -49,6 +51,10 @@ class UnitAliasMap
         'saet' => PackageUnit::Set,
         'set' => PackageUnit::Set,
         'par' => PackageUnit::Pair,
+        'm' => PackageUnit::Meter,
+        'm.' => PackageUnit::Meter,
+        'meter' => PackageUnit::Meter,
+        'metre' => PackageUnit::Meter,
     ];
 
     public function normalize(string $unit): ?PackageUnit

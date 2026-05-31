@@ -7,4 +7,5 @@ enum CompareUnit: string
     case Kilogram = 'kg';
     case Liter = 'l';
     case Piece = 'stk';
+    case Meter = 'm';
 }

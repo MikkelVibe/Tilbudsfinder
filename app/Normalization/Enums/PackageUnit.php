@@ -10,6 +10,7 @@ enum PackageUnit: string
     case Centiliter = 'cl';
     case Liter = 'l';
     case Piece = 'stk';
+    case Meter = 'm';
     case Package = 'pakke';
     case Tray = 'bakke';
     case Set = 'saet';
@@ -21,6 +22,7 @@ enum PackageUnit: string
             self::Gram, self::Kilogram => CompareUnit::Kilogram,
             self::Milliliter, self::Centiliter, self::Liter => CompareUnit::Liter,
             self::Piece, self::Package, self::Tray, self::Set, self::Pair => CompareUnit::Piece,
+            self::Meter => CompareUnit::Meter,
         };
     }
 }
