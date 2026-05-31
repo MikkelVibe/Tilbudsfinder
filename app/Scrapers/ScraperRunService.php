@@ -7,6 +7,11 @@ use App\Imports\ImportPersistencePipeline;
 use App\Models\Grocer;
 use App\Models\ScrapeJob;
 use App\Scrapers\Bilka\BilkaScraper;
+use App\Scrapers\Coop\CoopBanner;
+use App\Scrapers\Coop\CoopTjekScraper;
+use App\Scrapers\Dagrofa\MenyScraper;
+use App\Scrapers\Dagrofa\MinKobmandScraper;
+use App\Scrapers\Dagrofa\SparScraper;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
 use App\Scrapers\Foetex\FoetexScraper;
@@ -60,10 +65,17 @@ class ScraperRunService
     private function scraper(string $grocerKey, bool $sleepBetweenDetailRequests): GrocerScraper
     {
         return match ($grocerKey) {
+            '365discount' => new CoopTjekScraper(CoopBanner::discount365()),
             'bilka' => new BilkaScraper,
+            'daglibrugsen' => new CoopTjekScraper(CoopBanner::daglibrugsen()),
             'foetex' => new FoetexScraper,
+            'kvickly' => new CoopTjekScraper(CoopBanner::kvickly()),
+            'meny' => new MenyScraper,
+            'minkobmand' => new MinKobmandScraper,
             'netto' => new NettoScraper,
             'rema1000' => new Rema1000Scraper(sleepBetweenDetailRequests: $sleepBetweenDetailRequests),
+            'spar' => new SparScraper,
+            'superbrugsen' => new CoopTjekScraper(CoopBanner::superbrugsen()),
             default => throw new ScraperRunException("Scraper [{$grocerKey}] is not supported."),
         };
     }
