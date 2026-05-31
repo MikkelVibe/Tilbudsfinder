@@ -25,6 +25,8 @@ class Rema1000Scraper implements GrocerScraper
 
     private const REMA_API_URL = 'https://api.digital.rema1000.dk/api';
 
+    private const REMA_CATALOG_URL = 'https://cphapp.rema1000.dk/api/v1/catalog/store/1/withchildren';
+
     private const TJEK_API_URL = 'https://squid-api.tjek.com/v2';
 
     private const TJEK_DEALER_ID = '11deC';
@@ -58,12 +60,22 @@ class Rema1000Scraper implements GrocerScraper
         $this->progress($progress, 'Found '.count($weeklyCatalogs).' active REMA 1000 Uge catalogs eligible for publishing.');
 
         $this->progress($progress, 'Fetching REMA 1000 Algolia avisvare products...');
-        $products = $this->fetchAvisvarerProducts($limit);
-        $this->progress($progress, 'Found '.count($products).' REMA 1000 avisvare products'.($limit ? ' after limit' : '').'.');
+        $algoliaProducts = $this->fetchAvisvarerProducts($limit);
+        $this->progress($progress, 'Found '.count($algoliaProducts).' REMA 1000 Algolia avisvare products'.($limit ? ' after limit' : '').'.');
+
+        $this->progress($progress, 'Fetching REMA 1000 catalog v1 advertised products...');
+        $catalogProducts = $this->fetchCatalogAdvertisedProducts($limit);
+        $this->progress($progress, 'Found '.count($catalogProducts).' REMA 1000 catalog v1 advertised products'.($limit ? ' after limit' : '').'.');
+
+        $comparison = $this->compareDiscoverySources($algoliaProducts, $catalogProducts);
+        $this->progress($progress, 'REMA 1000 discovery comparison: '.count($comparison['missing_from_catalog']).' missing from catalog; '.count($comparison['missing_from_algolia']).' missing from Algolia.');
+
+        $products = $this->mergeDiscoveredProducts($algoliaProducts, $catalogProducts);
+        $this->progress($progress, 'Using '.count($products).' REMA 1000 discovered advertised products after source union.');
 
         $details = $this->fetchProductDetails(array_keys($products), $progress);
         $this->progress($progress, 'Grouping REMA 1000 products by best Tjek catalog overlap...');
-        $groupedOffers = $this->groupProductOffers($products, $details, $catalogs);
+        $groupedOffers = $this->groupProductOffers($products, $details, $catalogs, $comparison);
 
         if ($groupedOffers === []) {
             throw new ScraperFetchException('REMA 1000 found no advertised product offers matching active catalogs.');
@@ -170,6 +182,109 @@ class Rema1000Scraper implements GrocerScraper
     }
 
     /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function fetchCatalogAdvertisedProducts(?int $limit): array
+    {
+        $response = $this->catalogHttp()
+            ->get(self::REMA_CATALOG_URL)
+            ->throw()
+            ->json();
+
+        $departments = Arr::get($response, 'departments');
+
+        if (! is_array($departments)) {
+            throw new ScraperFetchException('REMA 1000 catalog v1 response did not contain departments.');
+        }
+
+        $products = [];
+
+        foreach ($departments as $department) {
+            if (! is_array($department)) {
+                continue;
+            }
+
+            foreach (Arr::get($department, 'categories', []) as $category) {
+                if (! is_array($category)) {
+                    continue;
+                }
+
+                foreach (Arr::get($category, 'items', []) as $item) {
+                    if (! is_array($item) || ! $this->isCatalogAdvertisedProduct($item)) {
+                        continue;
+                    }
+
+                    $id = (string) Arr::get($item, 'id', '');
+
+                    if ($id === '') {
+                        continue;
+                    }
+
+                    $products[$id] = [
+                        ...$item,
+                        'department_name' => $this->optionalString($department, 'name'),
+                        'category_name' => $this->optionalString($category, 'name'),
+                    ];
+
+                    if ($limit !== null && count($products) >= $limit) {
+                        return $products;
+                    }
+                }
+            }
+        }
+
+        if ($products === []) {
+            throw new ScraperFetchException('REMA 1000 catalog v1 returned no advertised products.');
+        }
+
+        return $products;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function isCatalogAdvertisedProduct(array $item): bool
+    {
+        return Arr::get($item, 'pricing.is_advertised') === true
+            || in_array('avisvare', Arr::get($item, 'labels', []), true);
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $algoliaProducts
+     * @param  array<string, array<string, mixed>>  $catalogProducts
+     * @return array{missing_from_catalog: list<string>, missing_from_algolia: list<string>}
+     */
+    private function compareDiscoverySources(array $algoliaProducts, array $catalogProducts): array
+    {
+        return [
+            'missing_from_catalog' => array_values(array_diff(array_keys($algoliaProducts), array_keys($catalogProducts))),
+            'missing_from_algolia' => array_values(array_diff(array_keys($catalogProducts), array_keys($algoliaProducts))),
+        ];
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $algoliaProducts
+     * @param  array<string, array<string, mixed>>  $catalogProducts
+     * @return array<string, array{algolia: array<string, mixed>|null, catalog: array<string, mixed>|null}>
+     */
+    private function mergeDiscoveredProducts(array $algoliaProducts, array $catalogProducts): array
+    {
+        $ids = array_unique([...array_keys($algoliaProducts), ...array_keys($catalogProducts)]);
+        sort($ids);
+
+        $products = [];
+
+        foreach ($ids as $id) {
+            $products[$id] = [
+                'algolia' => $algoliaProducts[$id] ?? null,
+                'catalog' => $catalogProducts[$id] ?? null,
+            ];
+        }
+
+        return $products;
+    }
+
+    /**
      * @param  list<string>  $productIds
      * @return array<string, array<string, mixed>>
      */
@@ -246,12 +361,13 @@ class Rema1000Scraper implements GrocerScraper
     }
 
     /**
-     * @param  array<string, array<string, mixed>>  $products
+     * @param  array<string, array{algolia: array<string, mixed>|null, catalog: array<string, mixed>|null}>  $products
      * @param  array<string, array<string, mixed>>  $details
      * @param  list<array<string, mixed>>  $catalogs
+     * @param  array{missing_from_catalog: list<string>, missing_from_algolia: list<string>}  $comparison
      * @return array<string, list<array<string, mixed>>>
      */
-    private function groupProductOffers(array $products, array $details, array $catalogs): array
+    private function groupProductOffers(array $products, array $details, array $catalogs, array $comparison): array
     {
         $groups = [];
 
@@ -277,9 +393,14 @@ class Rema1000Scraper implements GrocerScraper
             $catalogId = $this->requiredString($catalog, 'id');
             $groups[$catalogId] ??= [];
             $groups[$catalogId][] = [
-                'algolia' => $product,
+                'algolia' => $product['algolia'],
+                'catalog_product' => $product['catalog'],
                 'product_detail' => $detail,
                 'advertised_price' => $advertisedPrice,
+                'discovery_comparison' => [
+                    'missing_from_catalog' => in_array($productId, $comparison['missing_from_catalog'], true),
+                    'missing_from_algolia' => in_array($productId, $comparison['missing_from_algolia'], true),
+                ],
             ];
         }
 
@@ -405,6 +526,14 @@ class Rema1000Scraper implements GrocerScraper
                 'X-Timezone' => 'Copenhagen/Europe',
                 'X-Locale' => 'da',
             ]);
+    }
+
+    private function catalogHttp(): PendingRequest
+    {
+        return Http::acceptJson()
+            ->timeout(30)
+            ->connectTimeout(5)
+            ->retry([200, 500]);
     }
 
     private function tjekHttp(): PendingRequest

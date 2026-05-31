@@ -85,6 +85,25 @@ class Rema1000PaperParser
     }
 
     /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>|null
+     */
+    private function optionalArrayValue(array $payload, string $key): ?array
+    {
+        $value = Arr::get($payload, $key);
+
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_array($value)) {
+            throw new ScraperParseException("REMA 1000 payload {$key} must be an object when present.");
+        }
+
+        return $value;
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $offers
      * @return list<ParsedOfferInput>
      */
@@ -97,7 +116,7 @@ class Rema1000PaperParser
                 throw new ScraperParseException("REMA 1000 offer at index {$index} must be an object.");
             }
 
-            $parsedOffers[] = isset($offer['algolia'], $offer['product_detail'], $offer['advertised_price'])
+            $parsedOffers[] = (array_key_exists('algolia', $offer) || array_key_exists('catalog_product', $offer)) && isset($offer['product_detail'], $offer['advertised_price'])
                 ? $this->parseProductOffer($offer)
                 : $this->parseLegacyTjekOffer($offer);
         }
@@ -110,30 +129,39 @@ class Rema1000PaperParser
      */
     private function parseProductOffer(array $offer): ParsedOfferInput
     {
-        $algolia = $this->arrayValue($offer, 'algolia');
+        $algolia = $this->optionalArrayValue($offer, 'algolia');
+        $catalogProduct = $this->optionalArrayValue($offer, 'catalog_product');
         $detail = $this->arrayValue($offer, 'product_detail');
         $advertisedPrice = $this->arrayValue($offer, 'advertised_price');
+        $product = $catalogProduct ?? $algolia ?? [];
 
         return new ParsedOfferInput(
-            title: $this->requiredString($algolia, 'name'),
-            price: Arr::get($advertisedPrice, 'price', Arr::get($algolia, 'pricing.price')),
-            packageText: $this->optionalString($algolia, 'underline'),
-            sourceUnitPrice: $this->sourceUnitPrice($advertisedPrice, $algolia),
-            description: $this->optionalString($algolia, 'description_short') ?? $this->optionalString($algolia, 'description'),
-            imageUrl: $this->productImageUrl($algolia, $detail),
-            sourceOfferId: $this->optionalScalarString($detail, 'id') ?? $this->optionalScalarString($algolia, 'objectID'),
-            sourceProductId: $this->optionalScalarString($detail, 'id') ?? $this->optionalScalarString($algolia, 'id'),
-            purchaseLimitText: $this->productPurchaseLimitText($advertisedPrice, $algolia),
+            title: $this->requiredString($product, 'name'),
+            price: Arr::get($advertisedPrice, 'price', Arr::get($product, 'pricing.price')),
+            packageText: $this->optionalString($product, 'underline'),
+            sourceUnitPrice: $this->sourceUnitPrice($advertisedPrice, $product),
+            description: $this->optionalString($product, 'description_short') ?? $this->optionalString($product, 'description'),
+            imageUrl: $this->productImageUrl($product, $detail),
+            sourceOfferId: $this->optionalScalarString($detail, 'id') ?? $this->optionalScalarString($algolia ?? [], 'objectID') ?? $this->optionalScalarString($product, 'id'),
+            sourceProductId: $this->optionalScalarString($detail, 'id') ?? $this->optionalScalarString($product, 'id'),
+            purchaseLimitText: $this->productPurchaseLimitText($advertisedPrice, $product),
             metadata: array_filter([
-                'brand' => $this->optionalString($algolia, 'hf2'),
-                'department_id' => Arr::get($algolia, 'department_id'),
-                'department_name' => $this->optionalString($algolia, 'department_name'),
-                'category_id' => Arr::get($algolia, 'category_id'),
-                'category_name' => $this->optionalString($algolia, 'category_name'),
-                'bar_codes' => Arr::get($detail, 'bar_codes', Arr::get($algolia, 'bar_codes')),
+                'brand' => $this->optionalString($product, 'hf2'),
+                'department_id' => Arr::get($product, 'department_id'),
+                'department_name' => $this->optionalString($product, 'department_name'),
+                'category_id' => Arr::get($product, 'category_id'),
+                'category_name' => $this->optionalString($product, 'category_name'),
+                'bar_codes' => Arr::get($detail, 'bar_codes', Arr::get($product, 'bar_codes')),
                 'price_starts_at' => $this->optionalString($advertisedPrice, 'starting_at'),
                 'price_ends_at' => $this->optionalString($advertisedPrice, 'ending_at'),
                 'is_campaign' => Arr::get($advertisedPrice, 'is_campaign'),
+                'normal_price' => Arr::get($product, 'pricing.normal_price'),
+                'catalog_price_changes_on' => $this->optionalString($product, 'pricing.price_changes_on'),
+                'catalog_price_changes_type' => $this->optionalString($product, 'pricing.price_changes_type'),
+                'nutrition_info' => Arr::get($catalogProduct ?? [], 'nutrition_info'),
+                'declaration' => $this->optionalString($catalogProduct ?? [], 'declaration'),
+                'missing_from_catalog' => Arr::get($offer, 'discovery_comparison.missing_from_catalog'),
+                'missing_from_algolia' => Arr::get($offer, 'discovery_comparison.missing_from_algolia'),
             ], static fn (mixed $value): bool => $value !== null),
             sourcePayload: $offer,
         );

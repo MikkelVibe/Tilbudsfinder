@@ -27,10 +27,18 @@ class Rema1000ScraperTest extends TestCase
                 $this->algoliaProduct(404995, 'KYLLINGEBRYSTFILET', '450 GR. / DANSK'),
                 $this->algoliaProduct(170209, 'TOILETPAPIR', '684 GR. / REMA 1000'),
             ])),
+            'cphapp.rema1000.dk/api/v1/catalog/store/1/withchildren' => Http::response($this->catalogV1Response([
+                $this->catalogProduct(60055, 'LIMPAN CATALOG', '900 GR. / PÅGEN'),
+                $this->catalogProduct(61251, 'STORE HOTDOGBRØD', '360 GR. / REMA 1000'),
+                $this->catalogProduct(404995, 'KYLLINGEBRYSTFILET', '450 GR. / DANSK'),
+                $this->catalogProduct(170209, 'TOILETPAPIR', '684 GR. / REMA 1000'),
+                $this->catalogProduct(999999, 'KUN CATALOG', '200 GR. / TEST'),
+            ])),
             'api.digital.rema1000.dk/api/v3/products/60055?*' => Http::response(['data' => $this->productDetail(60055, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
             'api.digital.rema1000.dk/api/v3/products/61251?*' => Http::response(['data' => $this->productDetail(61251, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
             'api.digital.rema1000.dk/api/v3/products/404995?*' => Http::response(['data' => $this->productDetail(404995, '2026-05-26T00:00:00+00:00', '2026-06-13T00:00:00+00:00')]),
             'api.digital.rema1000.dk/api/v3/products/170209?*' => Http::response(['data' => $this->productDetail(170209, '2026-05-27T23:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
+            'api.digital.rema1000.dk/api/v3/products/999999?*' => Http::response(['data' => $this->productDetail(999999, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
         ]);
 
         $payloads = (new Rema1000Scraper(sleepBetweenDetailRequests: false))->fetchPapers();
@@ -43,9 +51,10 @@ class Rema1000ScraperTest extends TestCase
         $insertPayload = json_decode($payloads[1]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
 
         $this->assertSame('algolia_product_details_grouped_by_tjek_overlap', $weeklyPayload['catalog']['source_strategy']);
-        $this->assertSame(2, $weeklyPayload['catalog']['fetched_product_offer_count']);
+        $this->assertSame(3, $weeklyPayload['catalog']['fetched_product_offer_count']);
         $this->assertSame(1, $insertPayload['catalog']['fetched_product_offer_count']);
-        $this->assertSame('LIMPAN', $weeklyPayload['offers'][0]['algolia']['name']);
+        $this->assertSame('LIMPAN CATALOG', $weeklyPayload['offers'][0]['catalog_product']['name']);
+        $this->assertTrue($weeklyPayload['offers'][2]['discovery_comparison']['missing_from_algolia']);
         $this->assertSame('TOILETPAPIR', $insertPayload['offers'][0]['algolia']['name']);
         $this->assertFalse(collect($payloads)->contains(fn ($payload): bool => $payload->sourceExternalId === 'permanent-prices'));
     }
@@ -60,6 +69,9 @@ class Rema1000ScraperTest extends TestCase
             ]),
             'flwdn2189e-dsn.algolia.net/*' => Http::response($this->algoliaResponse([
                 $this->algoliaProduct(60055, 'LIMPAN', '900 GR. / PÅGEN'),
+            ])),
+            'cphapp.rema1000.dk/api/v1/catalog/store/1/withchildren' => Http::response($this->catalogV1Response([
+                $this->catalogProduct(60055, 'LIMPAN', '900 GR. / PÅGEN'),
             ])),
             'api.digital.rema1000.dk/api/v3/products/60055?*' => Http::response(['message' => 'InternalServerError'], 500),
         ]);
@@ -121,6 +133,53 @@ class Rema1000ScraperTest extends TestCase
             'department_name' => 'Brød & Bavinchi',
             'category_id' => 655390,
             'category_name' => 'Brød',
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $items
+     * @return array<string, mixed>
+     */
+    private function catalogV1Response(array $items): array
+    {
+        return [
+            'departments' => [[
+                'name' => 'Brød & Bavinchi',
+                'categories' => [[
+                    'name' => 'Brød',
+                    'items' => $items,
+                ]],
+            ]],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function catalogProduct(int $id, string $name, string $underline): array
+    {
+        return [
+            'id' => $id,
+            'name' => $name,
+            'underline' => $underline,
+            'hf2' => 'REMA 1000',
+            'labels' => ['avisvare', 'discount'],
+            'description_short' => "Varenummer: {$id}",
+            'declaration' => 'Ingredienser',
+            'nutrition_info' => [['name' => 'Energi', 'value' => '100 kcal', 'sort' => '1']],
+            'pricing' => [
+                'price' => 10,
+                'normal_price' => 20,
+                'price_per_unit' => '50.00 per Kg.',
+                'max_quantity' => 6,
+                'is_advertised' => true,
+                'price_changes_on' => '2026-05-26',
+                'price_changes_type' => 'campaign',
+            ],
+            'images' => [[
+                'large' => "https://images.example/catalog/{$id}.webp",
+            ]],
+            'bar_codes' => ["570000{$id}"],
         ];
     }
 

@@ -109,6 +109,35 @@ class Rema1000PaperParserTest extends TestCase
         $this->assertSame('2026-05-26T00:00:00+00:00', $offer->metadata['price_starts_at']);
     }
 
+    public function test_it_prefers_catalog_product_metadata_when_available(): void
+    {
+        $payload = [
+            'catalog' => [
+                'id' => 'weekly-paper',
+                'label' => 'Uge 22',
+                'run_from' => '2026-05-25T22:00:00+0000',
+                'run_till' => '2026-05-30T21:59:59+0000',
+                'dealer_id' => '11deC',
+                'dealer' => ['name' => 'REMA 1000'],
+                'source_strategy' => 'algolia_product_details_grouped_by_tjek_overlap',
+                'fetched_product_offer_count' => 10,
+            ],
+            'offers' => array_map(fn (int $number): array => $this->productOffer($number, catalogProduct: true), range(1, 10)),
+        ];
+
+        $paper = (new Rema1000PaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+        $offer = $paper->offers[0];
+
+        $this->assertSame('CATALOG PRODUCT 1', $offer->title);
+        $this->assertSame('250 GR. / CATALOG', $offer->packageText);
+        $this->assertSame('https://images.example/catalog/1.webp', $offer->imageUrl);
+        $this->assertSame(20, $offer->metadata['normal_price']);
+        $this->assertSame('2026-05-26', $offer->metadata['catalog_price_changes_on']);
+        $this->assertSame('campaign', $offer->metadata['catalog_price_changes_type']);
+        $this->assertSame('Ingredienser', $offer->metadata['declaration']);
+        $this->assertTrue($offer->metadata['missing_from_algolia']);
+    }
+
     public function test_it_rejects_rema_fixture_with_too_few_offers(): void
     {
         $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
@@ -128,9 +157,9 @@ class Rema1000PaperParserTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private function productOffer(int $number): array
+    private function productOffer(int $number, bool $catalogProduct = false): array
     {
-        return [
+        $offer = [
             'algolia' => [
                 'id' => $number,
                 'objectID' => (string) $number,
@@ -157,6 +186,37 @@ class Rema1000PaperParserTest extends TestCase
                 'starting_at' => '2026-05-26T00:00:00+00:00',
                 'ending_at' => '2026-05-30T00:00:00+00:00',
             ],
+            'discovery_comparison' => [
+                'missing_from_catalog' => false,
+                'missing_from_algolia' => false,
+            ],
         ];
+
+        if ($catalogProduct) {
+            $offer['catalog_product'] = [
+                'id' => $number,
+                'name' => "CATALOG PRODUCT {$number}",
+                'underline' => '250 GR. / CATALOG',
+                'hf2' => 'CATALOG',
+                'description_short' => "Catalog varenummer: {$number}",
+                'declaration' => 'Ingredienser',
+                'nutrition_info' => [['name' => 'Energi', 'value' => '100 kcal', 'sort' => '1']],
+                'pricing' => [
+                    'price' => 10,
+                    'normal_price' => 20,
+                    'price_per_unit' => '40.00 per Kg.',
+                    'price_changes_on' => '2026-05-26',
+                    'price_changes_type' => 'campaign',
+                    'max_quantity' => 6,
+                ],
+                'images' => [['large' => "https://images.example/catalog/{$number}.webp"]],
+                'department_name' => 'Catalog afdeling',
+                'category_name' => 'Catalog kategori',
+                'bar_codes' => ["570001{$number}"],
+            ];
+            $offer['discovery_comparison']['missing_from_algolia'] = true;
+        }
+
+        return $offer;
     }
 }

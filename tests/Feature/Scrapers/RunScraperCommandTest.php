@@ -147,10 +147,28 @@ class RunScraperCommandTest extends TestCase
         $responses = [
             'squid-api.tjek.com/v2/catalogs*' => Http::response($catalogs),
             'flwdn2189e-dsn.algolia.net/*' => Http::response(['results' => [['hits' => $hits]]]),
+            'cphapp.rema1000.dk/api/v1/catalog/store/1/withchildren' => Http::response($this->remaCatalogV1Response($hits)),
             ...$detailResponses,
         ];
 
         Http::fake($responses);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $items
+     * @return array<string, mixed>
+     */
+    private function remaCatalogV1Response(array $items): array
+    {
+        return [
+            'departments' => [[
+                'name' => 'Brød & Bavinchi',
+                'categories' => [[
+                    'name' => 'Brød',
+                    'items' => $items,
+                ]],
+            ]],
+        ];
     }
 
     private function fakeNettoResponses(): void
