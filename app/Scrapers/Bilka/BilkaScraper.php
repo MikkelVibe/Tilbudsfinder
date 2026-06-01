@@ -19,7 +19,30 @@ class BilkaScraper implements GrocerScraper
 
     private const TJEK_DEALER_ID = '93f13';
 
-    private const OFFERS_PAGE_SIZE = 100;
+    private const BILKATOGO_ALGOLIA_APP_ID = 'F9VBJLR1BK';
+
+    private const BILKATOGO_ALGOLIA_API_KEY = '1deaf41c87e729779f7695c00f190cc9';
+
+    private const BILKATOGO_INDEX = 'prod_BILKATOGO_PRODUCTS';
+
+    private const BILKATOGO_STORE_ID = '1653';
+
+    private const BILKATOGO_PAGE_SIZE = 1000;
+
+    /**
+     * @var list<string>
+     */
+    private const FOOD_CATEGORIES = [
+        'Frugt & grønt',
+        'Kød & fisk',
+        'Mejeri & køl',
+        'Drikkevarer',
+        'Brød & kager',
+        'Kolonial',
+        'Mad fra hele verden',
+        'Slik & snacks',
+        'Frost',
+    ];
 
     public function __construct(
         private readonly BilkaPaperParser $parser = new BilkaPaperParser,
@@ -49,9 +72,9 @@ class BilkaScraper implements GrocerScraper
         return array_map(function (array $catalog) use ($limit, $progress): RawPaperPayload {
             $catalogId = $this->requiredString($catalog, 'id');
 
-            $this->progress($progress, "Fetching Bilka offers for catalog {$catalogId}...");
-            $offers = $this->fetchCatalogOffers($catalogId, $limit);
-            $this->progress($progress, 'Fetched '.count($offers)." Bilka offers for catalog {$catalogId}.".($limit ? ' after limit' : ''));
+            $this->progress($progress, "Fetching BilkaToGo food leaflet products for catalog {$catalogId}...");
+            $offers = $this->fetchBilkaToGoFoodLeafletProducts($limit);
+            $this->progress($progress, 'Fetched '.count($offers).' BilkaToGo food leaflet products.'.($limit ? ' after limit' : ''));
 
             return $this->rawPayload($catalog, $offers);
         }, $foodCatalogs);
@@ -101,38 +124,60 @@ class BilkaScraper implements GrocerScraper
     /**
      * @return list<array<string, mixed>>
      */
-    private function fetchCatalogOffers(string $catalogId, ?int $limit): array
+    private function fetchBilkaToGoFoodLeafletProducts(?int $limit): array
     {
         $offers = [];
-        $offset = 0;
+        $seenIds = [];
 
-        do {
-            $pageLimit = $limit === null ? self::OFFERS_PAGE_SIZE : min(self::OFFERS_PAGE_SIZE, $limit - count($offers));
+        foreach (self::FOOD_CATEGORIES as $category) {
+            $page = 0;
 
-            if ($pageLimit <= 0) {
-                break;
-            }
+            do {
+                $pageLimit = $limit === null ? self::BILKATOGO_PAGE_SIZE : min(self::BILKATOGO_PAGE_SIZE, $limit - count($offers));
 
-            $page = $this->tjekHttp()
-                ->get(self::TJEK_API_URL.'/offers', [
-                    'catalog_id' => $catalogId,
-                    'offset' => $offset,
-                    'limit' => $pageLimit,
-                ])
-                ->throw()
-                ->json();
+                if ($pageLimit <= 0) {
+                    break 2;
+                }
 
-            if (! is_array($page)) {
-                throw new ScraperFetchException("Bilka offers response for catalog {$catalogId} was not an array.");
-            }
+                $response = $this->bilkaToGoHttp()
+                    ->post('https://'.mb_strtolower(self::BILKATOGO_ALGOLIA_APP_ID).'-dsn.algolia.net/1/indexes/'.self::BILKATOGO_INDEX.'/query', [
+                        'query' => '*',
+                        'filters' => $this->bilkaToGoLeafletFilter($category),
+                        'attributesToRetrieve' => $this->bilkaToGoAttributes(),
+                        'hitsPerPage' => $pageLimit,
+                        'page' => $page,
+                    ])
+                    ->throw()
+                    ->json();
 
-            $pageOffers = array_values(array_filter($page, 'is_array'));
-            $offers = array_merge($offers, $pageOffers);
-            $offset += count($pageOffers);
-        } while (count($pageOffers) === $pageLimit && ($limit === null || count($offers) < $limit));
+                if (! is_array($response)) {
+                    throw new ScraperFetchException("BilkaToGo leaflet response for category {$category} was not an object.");
+                }
+
+                $hits = array_values(array_filter(Arr::get($response, 'hits', []), 'is_array'));
+
+                foreach ($hits as $hit) {
+                    $id = $this->optionalString($hit, 'objectID');
+
+                    if ($id === null || isset($seenIds[$id])) {
+                        continue;
+                    }
+
+                    $seenIds[$id] = true;
+                    $offers[] = $hit;
+
+                    if ($limit !== null && count($offers) >= $limit) {
+                        break 3;
+                    }
+                }
+
+                $page++;
+                $nbPages = is_numeric(Arr::get($response, 'nbPages')) ? (int) Arr::get($response, 'nbPages') : $page;
+            } while ($page < $nbPages && $hits !== []);
+        }
 
         if ($offers === []) {
-            throw new ScraperFetchException("Bilka catalog {$catalogId} returned no offers.");
+            throw new ScraperFetchException('BilkaToGo food leaflet returned no products.');
         }
 
         return $offers;
@@ -148,7 +193,9 @@ class BilkaScraper implements GrocerScraper
         $rawPayload = $this->encode([
             'catalog' => [
                 ...$catalog,
-                'source_strategy' => 'tjek_food_weekly_catalog_offers',
+                'source_strategy' => 'bilkatogo_leaflet_food_products_with_tjek_dates',
+                'bilkatogo_store_id' => self::BILKATOGO_STORE_ID,
+                'food_categories' => self::FOOD_CATEGORIES,
                 'fetched_offer_count' => count($offers),
                 'offer_count_mismatch' => is_numeric(Arr::get($catalog, 'offer_count')) ? (int) Arr::get($catalog, 'offer_count') - count($offers) : null,
             ],
@@ -180,6 +227,59 @@ class BilkaScraper implements GrocerScraper
             ->timeout(20)
             ->connectTimeout(5)
             ->retry([200, 500]);
+    }
+
+    private function bilkaToGoHttp(): PendingRequest
+    {
+        return Http::acceptJson()
+            ->withHeaders([
+                'X-Algolia-Api-Key' => self::BILKATOGO_ALGOLIA_API_KEY,
+                'X-Algolia-Application-Id' => self::BILKATOGO_ALGOLIA_APP_ID,
+            ])
+            ->timeout(30)
+            ->connectTimeout(5)
+            ->retry([200, 500]);
+    }
+
+    private function bilkaToGoLeafletFilter(string $category): string
+    {
+        return 'consumerFacingHierarchy.lvl0:"'.$category.'"'
+            .' AND inStockStore:'.self::BILKATOGO_STORE_ID
+            .' AND isInAssortmentIn:'.self::BILKATOGO_STORE_ID
+            .' AND nonsearchable:false'
+            .' AND isInCurrentLeaflet:true';
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function bilkaToGoAttributes(): array
+    {
+        return [
+            'objectID',
+            'article',
+            'brand',
+            'description',
+            'netcontent',
+            'imageGUIDs',
+            'images',
+            'infos',
+            'isInCurrentLeaflet',
+            'isInOffer',
+            'name',
+            'storeData',
+            'cpOffer',
+            'cpOfferAmount',
+            'cpOfferId',
+            'cpOfferPrice',
+            'cpOfferFromDate',
+            'cpOfferToDate',
+            'subBrand',
+            'units',
+            'unitsOfMeasure',
+            'consumerFacingHierarchy',
+            'nonsearchable',
+        ];
     }
 
     private function progress(?callable $progress, string $message): void

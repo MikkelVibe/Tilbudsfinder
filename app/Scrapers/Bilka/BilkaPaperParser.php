@@ -39,6 +39,9 @@ class BilkaPaperParser
                 'offer_count' => Arr::get($catalog, 'offer_count'),
                 'fetched_offer_count' => Arr::get($catalog, 'fetched_offer_count'),
                 'offer_count_mismatch' => Arr::get($catalog, 'offer_count_mismatch'),
+                'salling_enriched_offer_count' => Arr::get($catalog, 'salling_enriched_offer_count'),
+                'bilkatogo_store_id' => Arr::get($catalog, 'bilkatogo_store_id'),
+                'food_categories' => Arr::get($catalog, 'food_categories'),
                 'page_count' => Arr::get($catalog, 'page_count'),
                 'pdf_url' => $this->optionalString($catalog, 'pdf_url'),
                 'source_strategy' => $this->optionalString($catalog, 'source_strategy'),
@@ -110,6 +113,10 @@ class BilkaPaperParser
      */
     private function parseOfferVariants(array $offer): array
     {
+        if ($this->isBilkaToGoLeafletProduct($offer)) {
+            return [$this->parseBilkaToGoLeafletProduct($offer)];
+        }
+
         $variants = $this->descriptionVariants($offer);
 
         if (count($variants) < 2) {
@@ -126,6 +133,53 @@ class BilkaPaperParser
     /**
      * @param  array<string, mixed>  $offer
      */
+    private function parseBilkaToGoLeafletProduct(array $offer): ParsedOfferInput
+    {
+        $store = $this->bilkaToGoStoreData($offer);
+        $price = Arr::get($store, 'price');
+        $unitPrice = Arr::get($store, 'unitsOfMeasureOfferPrice') ?: Arr::get($store, 'unitsOfMeasurePrice');
+        $unitPriceUnit = $this->optionalString($store, 'unitsOfMeasurePriceUnit');
+        $sourceUnitPriceText = is_numeric($unitPrice) && $unitPriceUnit !== null
+            ? $this->moneyTextFromCents((int) $unitPrice).' / '.$unitPriceUnit
+            : null;
+
+        return new ParsedOfferInput(
+            title: $this->bilkaToGoTitle($offer),
+            price: is_numeric($price) ? $this->moneyTextFromCents((int) $price) : null,
+            packageText: $this->bilkaToGoPackageText($offer),
+            sourceUnitPriceText: $sourceUnitPriceText,
+            description: $this->optionalString($offer, 'description') ?? $this->optionalString($store, 'offerDescription'),
+            imageUrl: $this->bilkaToGoImageUrl($offer),
+            sourceOfferId: $this->optionalString($offer, 'objectID'),
+            sourceProductId: $this->optionalString($offer, 'objectID'),
+            isConditional: false,
+            purchaseLimitText: $this->bilkaToGoPurchaseLimitText($store),
+            metadata: array_filter([
+                'source' => 'bilkatogo_leaflet',
+                'article' => $this->optionalString($offer, 'article'),
+                'brand' => $this->optionalString($offer, 'brand'),
+                'sub_brand' => $this->optionalString($offer, 'subBrand'),
+                'categories' => Arr::get($offer, 'consumerFacingHierarchy.lvl0'),
+                'offer_description' => $this->optionalString($store, 'offerDescription'),
+            ], static fn (mixed $value): bool => $value !== null),
+            sourcePayload: [
+                ...$offer,
+                '_salling_enrichment' => [
+                    'source' => 'bilkatogo',
+                    'source_product_id' => $this->optionalString($offer, 'objectID'),
+                    'title' => $this->bilkaToGoTitle($offer),
+                    'brand' => $this->optionalString($offer, 'brand'),
+                    'package_text' => $this->bilkaToGoPackageText($offer),
+                    'eans' => $this->bilkaToGoEans($offer),
+                    'match_method' => 'bilkatogo_leaflet_product',
+                ],
+            ],
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
     private function parseOffer(array $offer): ParsedOfferInput
     {
         return new ParsedOfferInput(
@@ -136,6 +190,7 @@ class BilkaPaperParser
             description: $this->optionalString($offer, 'description'),
             imageUrl: $this->imageUrl($offer),
             sourceOfferId: $this->optionalString($offer, 'id'),
+            sourceProductId: $this->sallingSourceProductId($offer),
             isConditional: $this->isConditional($offer),
             purchaseLimitText: $this->purchaseLimitText($offer),
             metadata: array_filter([
@@ -170,6 +225,7 @@ class BilkaPaperParser
             description: $this->optionalString($offer, 'description'),
             imageUrl: $this->imageUrl($offer),
             sourceOfferId: $originalSourceOfferId === null ? null : $originalSourceOfferId.':variant-'.str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT),
+            sourceProductId: $this->sallingSourceProductId($offer),
             isConditional: false,
             purchaseLimitText: $this->purchaseLimitText($offer),
             metadata: array_filter([
@@ -318,6 +374,165 @@ class BilkaPaperParser
     /**
      * @param  array<string, mixed>  $offer
      */
+    private function isBilkaToGoLeafletProduct(array $offer): bool
+    {
+        return $this->optionalString($offer, 'objectID') !== null
+            && $this->optionalString($offer, 'name') !== null
+            && is_array(Arr::get($offer, 'storeData'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     * @return array<string, mixed>
+     */
+    private function bilkaToGoStoreData(array $offer): array
+    {
+        $stores = Arr::get($offer, 'storeData');
+
+        if (! is_array($stores)) {
+            return [];
+        }
+
+        $preferredStore = Arr::get($stores, '1653');
+
+        if (is_array($preferredStore)) {
+            return $preferredStore;
+        }
+
+        foreach ($stores as $store) {
+            if (is_array($store)) {
+                return $store;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
+    private function bilkaToGoTitle(array $offer): string
+    {
+        $parts = array_filter([
+            $this->optionalString($offer, 'brand'),
+            $this->optionalString($offer, 'name'),
+        ], static fn (?string $value): bool => $value !== null && trim($value) !== '');
+
+        $title = implode(' ', $parts);
+
+        if ($title === '') {
+            throw new ScraperParseException('BilkaToGo product is missing name.');
+        }
+
+        return $title;
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
+    private function bilkaToGoPackageText(array $offer): ?string
+    {
+        $netContent = $this->optionalString($offer, 'netcontent');
+
+        if ($netContent !== null) {
+            return $netContent;
+        }
+
+        $parts = array_filter([
+            $this->optionalScalarString($offer, 'units'),
+            $this->optionalString($offer, 'unitsOfMeasure'),
+        ], static fn (?string $value): bool => $value !== null && trim($value) !== '');
+
+        return $parts === [] ? null : implode(' ', $parts);
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     * @return list<string>
+     */
+    private function bilkaToGoEans(array $offer): array
+    {
+        $infos = Arr::get($offer, 'infos', []);
+
+        if (! is_array($infos)) {
+            return [];
+        }
+
+        $eans = [];
+
+        foreach ($infos as $info) {
+            if (! is_array($info)) {
+                continue;
+            }
+
+            $items = Arr::get($info, 'items', []);
+
+            if (! is_array($items)) {
+                continue;
+            }
+
+            foreach ($items as $item) {
+                $value = is_array($item) && mb_strtolower((string) Arr::get($item, 'title')) === 'ean'
+                    ? Arr::get($item, 'value')
+                    : null;
+
+                if (is_scalar($value) && preg_match('/^\d{8,14}$/', (string) $value) === 1) {
+                    $eans[] = (string) $value;
+                }
+            }
+        }
+
+        return array_values(array_unique($eans));
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
+    private function bilkaToGoImageUrl(array $offer): ?string
+    {
+        foreach (['images.primary', 'images.zoom', 'images.view', 'images.thumb'] as $key) {
+            $url = $this->optionalString($offer, $key);
+
+            if ($url !== null) {
+                return $url;
+            }
+        }
+
+        $images = Arr::get($offer, 'images');
+
+        if (is_array($images)) {
+            foreach ($images as $image) {
+                if (is_string($image) && trim($image) !== '') {
+                    return $image;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $store
+     */
+    private function bilkaToGoPurchaseLimitText(array $store): ?string
+    {
+        $limit = Arr::get($store, 'offerMax');
+
+        if (is_numeric($limit) && (int) $limit > 0) {
+            return 'Maks. '.(int) $limit;
+        }
+
+        return $this->optionalString($store, 'offerMaxDescription');
+    }
+
+    private function moneyTextFromCents(int $cents): string
+    {
+        return number_format($cents / 100, 2, '.', '');
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
     private function quantityText(array $offer): ?string
     {
         $piecesFrom = Arr::get($offer, 'quantity.pieces.from');
@@ -429,6 +644,14 @@ class BilkaPaperParser
     }
 
     /**
+     * @param  array<string, mixed>  $offer
+     */
+    private function sallingSourceProductId(array $offer): ?string
+    {
+        return $this->optionalString($offer, '_salling_enrichment.source_product_id');
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      */
     private function requiredString(array $payload, string $key): string
@@ -451,6 +674,20 @@ class BilkaPaperParser
 
         if (is_string($value) && trim($value) !== '') {
             return $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function optionalScalarString(array $payload, string $key): ?string
+    {
+        $value = Arr::get($payload, $key);
+
+        if (is_scalar($value) && trim((string) $value) !== '') {
+            return (string) $value;
         }
 
         return null;

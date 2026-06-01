@@ -77,6 +77,38 @@ class BilkaPaperParserTest extends TestCase
         $this->assertSame(NormalizationStatus::Succeeded, $chicken->normalization_status);
     }
 
+    public function test_it_parses_bilkatogo_leaflet_products_with_tjek_paper_dates(): void
+    {
+        $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
+        $payload['catalog']['source_strategy'] = 'bilkatogo_leaflet_food_products_with_tjek_dates';
+        $payload['catalog']['bilkatogo_store_id'] = '1653';
+        $payload['catalog']['food_categories'] = ['Frugt & grønt'];
+        $payload['catalog']['fetched_offer_count'] = 10;
+        $payload['offers'] = array_map(fn (int $number): array => $this->bilkaToGoProduct($number), range(1, 10));
+
+        $paper = (new BilkaPaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+        $offer = $paper->offers[0];
+
+        $this->assertSame('Jrf1G_2x', $paper->sourceExternalId);
+        $this->assertSame('2026-05-28 22:00:00', $paper->activeFrom->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-06-04 21:59:59', $paper->activeUntil->format('Y-m-d H:i:s'));
+        $this->assertSame('bilkatogo_leaflet_food_products_with_tjek_dates', $paper->metadata['source_strategy']);
+        $this->assertCount(10, $paper->offers);
+
+        $this->assertSame('Salling Product 1', $offer->title);
+        $this->assertSame('10.00', $offer->price);
+        $this->assertSame('200 g', $offer->packageText);
+        $this->assertSame('50.00 / Kg.', $offer->sourceUnitPriceText);
+        $this->assertSame('product-1', $offer->sourceOfferId);
+        $this->assertSame('product-1', $offer->sourceProductId);
+        $this->assertSame(['5700000000001'], $offer->sourcePayload['_salling_enrichment']['eans']);
+
+        $normalized = (new OfferNormalizer)->normalize($offer);
+
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $normalized->status);
+        $this->assertSame('50.00', $normalized->unitPrice?->decimal());
+    }
+
     public function test_it_rejects_bilka_fixture_with_too_few_offers(): void
     {
         $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
@@ -259,6 +291,40 @@ class BilkaPaperParserTest extends TestCase
             ],
             'images' => ['zoom' => 'https://images.example/bilka.webp'],
         ], $overrides);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function bilkaToGoProduct(int $number): array
+    {
+        return [
+            'objectID' => "product-{$number}",
+            'article' => "article-{$number}",
+            'name' => "Product {$number}",
+            'brand' => 'Salling',
+            'description' => 'Salling product description',
+            'netcontent' => '200 g',
+            'storeData' => [
+                '1653' => [
+                    'price' => 1000,
+                    'unitsOfMeasureOfferPrice' => 5000,
+                    'unitsOfMeasurePriceUnit' => 'Kg.',
+                    'offerDescription' => 'Skarp pris',
+                    'offerMax' => 0,
+                ],
+            ],
+            'consumerFacingHierarchy' => [
+                'lvl0' => ['Frugt & grønt'],
+            ],
+            'infos' => [
+                [
+                    'items' => [
+                        ['title' => 'EAN', 'value' => '570000000000'.$number],
+                    ],
+                ],
+            ],
+        ];
     }
 
     private function fixture(): string

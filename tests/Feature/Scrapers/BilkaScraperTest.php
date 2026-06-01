@@ -10,7 +10,7 @@ use Tests\TestCase;
 
 class BilkaScraperTest extends TestCase
 {
-    public function test_it_fetches_only_food_weekly_bilka_catalogs_with_tjek_offers(): void
+    public function test_it_fetches_only_food_weekly_bilka_catalogs_with_bilkatogo_leaflet_products(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
         Http::preventStrayRequests();
@@ -21,7 +21,11 @@ class BilkaScraperTest extends TestCase
                 $this->catalog('outdoor-paper', 'Bilka Outdoor 2026', 12),
                 $this->catalog('expired-food-paper', 'Bilka Food Uge 22 2026 - Fødevarer', 12, '2026-05-20T22:00:00+0000', '2026-05-27T21:59:59+0000'),
             ]),
-            'squid-api.tjek.com/v2/offers?catalog_id=food-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->offer($number), range(1, 12))),
+            'f9vbjlr1bk-dsn.algolia.net/1/indexes/prod_BILKATOGO_PRODUCTS/query' => Http::response([
+                'nbHits' => 12,
+                'nbPages' => 1,
+                'hits' => array_map(fn (int $number): array => $this->bilkaToGoProduct($number), range(1, 12)),
+            ]),
         ]);
 
         $payloads = (new BilkaScraper)->fetchPapers();
@@ -32,10 +36,20 @@ class BilkaScraperTest extends TestCase
 
         $payload = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
 
-        $this->assertSame('tjek_food_weekly_catalog_offers', $payload['catalog']['source_strategy']);
+        $this->assertSame('bilkatogo_leaflet_food_products_with_tjek_dates', $payload['catalog']['source_strategy']);
+        $this->assertSame('1653', $payload['catalog']['bilkatogo_store_id']);
+        $this->assertContains('Frugt & grønt', $payload['catalog']['food_categories']);
         $this->assertSame(12, $payload['catalog']['fetched_offer_count']);
         $this->assertSame(0, $payload['catalog']['offer_count_mismatch']);
-        $this->assertSame('Product 1', $payload['offers'][0]['heading']);
+        $this->assertSame('Product 1', $payload['offers'][0]['name']);
+        $this->assertSame('5700000000001', $payload['offers'][0]['infos'][0]['items'][0]['value']);
+
+        Http::assertSent(function ($request): bool {
+            return str_contains($request->url(), 'prod_BILKATOGO_PRODUCTS/query')
+                && str_contains($request['filters'], 'consumerFacingHierarchy.lvl0:"Frugt & grønt"')
+                && str_contains($request['filters'], 'inStockStore:1653')
+                && str_contains($request['filters'], 'isInCurrentLeaflet:true');
+        });
     }
 
     public function test_it_fails_when_no_food_weekly_catalog_is_active(): void
@@ -74,21 +88,35 @@ class BilkaScraperTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private function offer(int $number): array
+    private function bilkaToGoProduct(int $number): array
     {
         return [
-            'id' => "offer-{$number}",
-            'heading' => "Product {$number}",
-            'description' => '200 g. Pr. kg 50,00.',
-            'catalog_page' => $number,
-            'pricing' => ['price' => 10, 'currency' => 'DKK'],
-            'quantity' => [
-                'unit' => ['symbol' => 'g'],
-                'size' => ['from' => 200, 'to' => 200],
-                'pieces' => ['from' => 1, 'to' => 1],
+            'objectID' => "product-{$number}",
+            'name' => "Product {$number}",
+            'brand' => 'Salling',
+            'description' => 'Salling product description',
+            'netcontent' => '200 g',
+            'units' => 200,
+            'unitsOfMeasure' => 'g',
+            'storeData' => [
+                '1653' => [
+                    'price' => 1000,
+                    'unitsOfMeasureOfferPrice' => 5000,
+                    'unitsOfMeasurePriceUnit' => 'Kg.',
+                    'offerDescription' => 'Skarp pris',
+                    'offerMax' => 0,
+                ],
             ],
-            'images' => ['zoom' => "https://images.example/bilka/{$number}.webp"],
-            'catalog_id' => 'food-paper',
+            'consumerFacingHierarchy' => [
+                'lvl0' => ['Frugt & grønt'],
+            ],
+            'infos' => [
+                [
+                    'items' => [
+                        ['title' => 'EAN', 'value' => '570000000000'.$number],
+                    ],
+                ],
+            ],
         ];
     }
 }
