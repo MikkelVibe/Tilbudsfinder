@@ -15,6 +15,7 @@ use App\Scrapers\Dagrofa\SparScraper;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
 use App\Scrapers\Foetex\FoetexScraper;
+use App\Scrapers\Nemlig\NemligScraper;
 use App\Scrapers\Netto\NettoScraper;
 use App\Scrapers\Rema1000\Rema1000Scraper;
 
@@ -72,6 +73,7 @@ class ScraperRunService
             'kvickly' => new CoopTjekScraper(CoopBanner::kvickly()),
             'meny' => new MenyScraper,
             'minkobmand' => new MinKobmandScraper,
+            'nemlig' => new NemligScraper,
             'netto' => new NettoScraper,
             'rema1000' => new Rema1000Scraper(sleepBetweenDetailRequests: $sleepBetweenDetailRequests),
             'spar' => new SparScraper,

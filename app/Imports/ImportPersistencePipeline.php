@@ -9,7 +9,9 @@ use App\Enums\ScrapeJobStatus;
 use App\Imports\DTO\ParsedPaperInput;
 use App\Imports\Exceptions\DuplicatePaperImportException;
 use App\Imports\Exceptions\ImportPipelineException;
+use App\Jobs\MatchImportBatchProducts;
 use App\Models\Grocer;
+use App\Models\GrocerProduct;
 use App\Models\ImportBatch;
 use App\Models\NormalizationFailure;
 use App\Models\Paper;
@@ -19,6 +21,8 @@ use App\Normalization\DTO\NormalizationIssue;
 use App\Normalization\DTO\NormalizedOffer;
 use App\Normalization\Enums\NormalizedOfferStatus;
 use App\Normalization\OfferNormalizer;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -116,6 +120,8 @@ class ImportPersistencePipeline
                 throw new ImportPipelineException($batch->failure_reason ?? 'Import failed.');
             }
 
+            MatchImportBatchProducts::dispatch($batch)->afterCommit()->onQueue('matching');
+
             return $batch;
         } catch (DuplicatePaperImportException $exception) {
             throw $exception;
@@ -170,10 +176,13 @@ class ImportPersistencePipeline
 
     private function persistOffer(Grocer $grocer, ImportBatch $batch, Paper $paper, NormalizedOffer $offer): ScrapedOffer
     {
+        $grocerProduct = $this->persistGrocerProduct($grocer, $offer);
+
         return ScrapedOffer::create([
             'grocer_id' => $grocer->id,
             'import_batch_id' => $batch->id,
             'paper_id' => $paper->id,
+            'grocer_product_id' => $grocerProduct?->id,
             'source_offer_id' => $offer->sourceOfferId,
             'source_product_id' => $offer->sourceProductId,
             'title' => $offer->title,
@@ -194,6 +203,88 @@ class ImportPersistencePipeline
             'normalization_confidence' => $offer->confidence,
             'source_payload' => $offer->sourcePayload,
         ]);
+    }
+
+    private function persistGrocerProduct(Grocer $grocer, NormalizedOffer $offer): ?GrocerProduct
+    {
+        if ($offer->sourceProductId === null || trim($offer->sourceProductId) === '') {
+            return null;
+        }
+
+        return GrocerProduct::query()->updateOrCreate(
+            [
+                'grocer_id' => $grocer->id,
+                'source_product_id' => $offer->sourceProductId,
+            ],
+            array_filter([
+                'name' => $offer->title,
+                'brand' => $this->metadataString($offer, 'brand'),
+                'category' => $this->metadataString($offer, 'category'),
+                'subcategory' => $this->metadataString($offer, 'subcategory'),
+                'description' => $offer->description,
+                'image_url' => $offer->imageUrl,
+                'package_amount' => $offer->packageAmount ? (string) $offer->packageAmount : null,
+                'package_unit' => $offer->packageUnit?->value,
+                'compare_unit' => $offer->compareUnit?->value,
+                'declaration' => $this->metadataString($offer, 'declaration'),
+                'attributes' => $this->metadataArray($offer, 'attributes'),
+                'traceability' => $this->metadataArray($offer, 'traceability'),
+                'raw_detail_payload' => $this->metadataArray($offer, 'raw_detail_payload'),
+                'nutrition_basis_unit' => $this->metadataString($offer, 'nutrition_basis_unit'),
+                'energy_kj_per_100' => $this->nutritionDecimal($offer, 'energy_kj'),
+                'energy_kcal_per_100' => $this->nutritionDecimal($offer, 'energy_kcal'),
+                'fat_g_per_100' => $this->nutritionDecimal($offer, 'fat'),
+                'saturated_fat_g_per_100' => $this->nutritionDecimal($offer, 'saturated_fat'),
+                'carbohydrate_g_per_100' => $this->nutritionDecimal($offer, 'carbohydrate'),
+                'sugars_g_per_100' => $this->nutritionDecimal($offer, 'sugar'),
+                'fiber_g_per_100' => $this->nutritionDecimal($offer, 'dietary_fiber'),
+                'protein_g_per_100' => $this->nutritionDecimal($offer, 'protein'),
+                'salt_g_per_100' => $this->nutritionDecimal($offer, 'salt'),
+                'detail_observed_at' => $this->metadataArray($offer, 'raw_detail_payload') === null ? null : now(),
+            ], static fn (mixed $value): bool => $value !== null)
+        );
+    }
+
+    private function metadataString(NormalizedOffer $offer, string $key): ?string
+    {
+        $value = $offer->metadata[$key] ?? null;
+
+        if (is_string($value) && trim($value) !== '') {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return (string) $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>|list<mixed>|null
+     */
+    private function metadataArray(NormalizedOffer $offer, string $key): ?array
+    {
+        $value = $offer->metadata[$key] ?? null;
+
+        return is_array($value) ? $value : null;
+    }
+
+    private function nutritionDecimal(NormalizedOffer $offer, string $key): ?string
+    {
+        $value = $offer->metadata['nutrition'][$key] ?? null;
+
+        if (! is_string($value) && ! is_int($value) && ! is_float($value)) {
+            return null;
+        }
+
+        $normalized = str_replace(',', '.', (string) $value);
+
+        if (! is_numeric($normalized)) {
+            return null;
+        }
+
+        return BigDecimal::of($normalized)->toScale(2, RoundingMode::HALF_UP)->__toString();
     }
 
     private function persistIssues(Grocer $grocer, ImportBatch $batch, ?ScrapedOffer $offer, NormalizedOffer $normalizedOffer): int

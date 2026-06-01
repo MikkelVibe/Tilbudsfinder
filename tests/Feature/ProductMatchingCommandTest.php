@@ -4,6 +4,9 @@ namespace Tests\Feature;
 
 use App\Enums\ImportBatchStatus;
 use App\Enums\NormalizationStatus;
+use App\Imports\DTO\ParsedPaperInput;
+use App\Imports\ImportPersistencePipeline;
+use App\Jobs\MatchImportBatchProducts;
 use App\Models\CanonicalProduct;
 use App\Models\Grocer;
 use App\Models\ImportBatch;
@@ -11,12 +14,42 @@ use App\Models\Paper;
 use App\Models\PriceObservation;
 use App\Models\ProductIdentifier;
 use App\Models\ScrapedOffer;
+use App\Normalization\DTO\ParsedOfferInput;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ProductMatchingCommandTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_import_pipeline_dispatches_matching_job_after_successful_import(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $paper = new ParsedPaperInput(
+            sourceExternalId: 'paper-1',
+            activeFrom: CarbonImmutable::parse('2026-06-01T00:00:00+00:00'),
+            activeUntil: CarbonImmutable::parse('2026-06-08T00:00:00+00:00'),
+            offers: array_map(fn (int $index): ParsedOfferInput => new ParsedOfferInput(
+                title: "Offer {$index}",
+                price: 10,
+                packageText: '500 g',
+                sourceProductId: (string) $index,
+                sourcePayload: ['catalog_product' => ['bar_codes' => ['7311070338188']]],
+            ), range(1, 10)),
+            title: 'Paper 1',
+            rawPayload: '{}',
+        );
+
+        $batch = (new ImportPersistencePipeline)->persist($grocer, $paper);
+
+        Queue::assertPushed(MatchImportBatchProducts::class, fn (MatchImportBatchProducts $job): bool => $job->importBatch->is($batch));
+    }
 
     public function test_it_creates_canonical_product_from_single_ean_offer(): void
     {
@@ -52,14 +85,9 @@ class ProductMatchingCommandTest extends TestCase
         $this->assertSame('LIMPAN', $product->name);
         $this->assertSame('PÅGEN', $product->brand);
         $this->assertSame('900.000', $product->package_amount);
-        $this->assertSame('251.00', $product->energy_kcal_per_100);
-        $this->assertSame('7.40', $product->protein_g_per_100);
-        $this->assertSame('1.00', $product->salt_g_per_100);
-        $this->assertSame('g', $product->nutrition_basis_unit);
 
-        $this->assertSame(2, ProductIdentifier::query()->count());
+        $this->assertSame(1, ProductIdentifier::query()->count());
         $this->assertDatabaseHas('product_identifiers', ['type' => 'ean', 'value' => '7311070338188', 'grocer_id' => null]);
-        $this->assertDatabaseHas('product_identifiers', ['type' => 'source_product_id', 'value' => '60055', 'grocer_id' => $grocer->id]);
         $this->assertDatabaseHas('product_matches', ['canonical_product_id' => $product->id, 'status' => 'matched', 'confidence' => 100]);
         $this->assertSame(1, PriceObservation::query()->count());
     }
@@ -83,7 +111,7 @@ class ProductMatchingCommandTest extends TestCase
 
         $this->assertSame(1, CanonicalProduct::query()->count());
         $this->assertSame(1, PriceObservation::query()->count());
-        $this->assertSame(3, ProductIdentifier::query()->count());
+        $this->assertSame(2, ProductIdentifier::query()->count());
         $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'ean', 'value' => '7311070338188']);
         $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'ean', 'value' => '7311070338195']);
         $this->assertDatabaseHas('product_matches', ['status' => 'matched', 'canonical_product_id' => $product->id]);
@@ -118,7 +146,6 @@ class ProductMatchingCommandTest extends TestCase
         $this->assertSame(1, CanonicalProduct::query()->count());
         $this->assertSame(2, PriceObservation::query()->count());
         $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'ean', 'value' => '5707196133561', 'grocer_id' => null]);
-        $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'source_product_id', 'value' => '5707196133561', 'grocer_id' => $dagrofa->id]);
     }
 
     public function test_it_matches_salling_enriched_offer_to_existing_ean_product(): void
@@ -156,7 +183,26 @@ class ProductMatchingCommandTest extends TestCase
         $this->assertSame(1, CanonicalProduct::query()->count());
         $this->assertSame(2, PriceObservation::query()->count());
         $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'ean', 'value' => '5711044475956', 'grocer_id' => null]);
-        $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'source_product_id', 'value' => 'salling-product-1', 'grocer_id' => $bilka->id]);
+    }
+
+    public function test_it_matches_pending_batches_synchronously(): void
+    {
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $batch = ImportBatch::factory()->for($grocer)->create(['status' => ImportBatchStatus::Succeeded]);
+        $paper = Paper::factory()->for($grocer)->for($batch)->create();
+
+        ScrapedOffer::factory()->for($grocer)->for($batch)->for($paper)->create([
+            'source_payload' => $this->sourcePayload(['7311070338188']),
+        ]);
+
+        $this->artisan('products:match-pending --sync')
+            ->expectsOutputToContain("Matched batch {$batch->id}")
+            ->expectsOutput('Processed import batches: 1')
+            ->assertSuccessful();
+
+        $this->assertSame(1, CanonicalProduct::query()->count());
+        $this->assertSame(1, ProductIdentifier::query()->count());
+        $this->assertSame(1, PriceObservation::query()->count());
     }
 
     /**

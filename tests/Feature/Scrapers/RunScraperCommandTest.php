@@ -95,6 +95,26 @@ class RunScraperCommandTest extends TestCase
         $this->assertSame(12, Paper::query()->withCount('scrapedOffers')->firstOrFail()->scraped_offers_count);
     }
 
+    public function test_it_runs_nemlig_scraper_and_persists_active_papers(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        $this->fakeNemligResponses();
+        Grocer::factory()->create(['slug' => 'nemlig', 'name' => 'Nemlig']);
+
+        $this->artisan('scraper:run nemlig')
+            ->expectsOutput('Scraper [nemlig] completed.')
+            ->expectsOutput('Fetched papers: 1')
+            ->expectsOutput('Imported papers: 1')
+            ->expectsOutput('Skipped duplicates: 0')
+            ->assertSuccessful();
+
+        $this->assertSame(1, ImportBatch::query()->count());
+        $this->assertSame(1, Paper::query()->count());
+        $this->assertSame(12, Paper::query()->withCount('scrapedOffers')->firstOrFail()->scraped_offers_count);
+    }
+
     public function test_it_skips_duplicate_rema_papers(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
@@ -201,6 +221,36 @@ class RunScraperCommandTest extends TestCase
                 $this->bilkaCatalog('food-paper', 'Bilka Food Uge 23 2026 - Fødevarer & Personlig Pleje', 12),
             ]),
             'squid-api.tjek.com/v2/offers?catalog_id=food-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->bilkaOffer($number), range(1, 12))),
+        ]);
+    }
+
+    private function fakeNemligResponses(): void
+    {
+        Http::fake([
+            'www.nemlig.com/tilbud*' => Http::response([
+                'Settings' => [
+                    'TimeslotUtc' => '2026060208-60-600',
+                    'DeliveryZoneId' => 1,
+                    'ProductsImportedTimestamp' => 'AAAAAAAA',
+                    'CombinedProductsAndSitecoreTimestamp' => 'AAAAAAAA-oLJ90N-_',
+                    'BuildVersion' => 'b1.0.9606.11183',
+                ],
+                'content' => [
+                    ['Heading' => 'Sponsoreret', 'ProductGroupId' => 'sponsored-group', 'TotalProducts' => 7],
+                    ['Heading' => 'Skarp pris', 'ProductGroupId' => 'group-1', 'TotalProducts' => 12],
+                ],
+            ]),
+            'www.nemlig.com/webapi/Token' => Http::response(['access_token' => 'test-token']),
+            'www.nemlig.com/webapi/AAAAAAAA-oLJ90N-_/2026060208-60-600/1/0/Products/GetByProductGroupId?productGroupId=group-1&pageIndex=0&pagesize=200' => Http::response([
+                'Products' => array_map(fn (int $number): array => $this->nemligOffer($number), range(1, 12)),
+                'ProductGroupId' => 'group-1',
+                'Start' => 0,
+                'NumFound' => 12,
+            ]),
+            'www.nemlig.com/webapi/AAAAAAAA/2026060208-60-600/1/0/Products/Get?id=*' => Http::response([
+                'Declarations' => ['ShowDeclarations' => false],
+                'Attributes' => [],
+            ]),
         ]);
     }
 
@@ -366,6 +416,35 @@ class RunScraperCommandTest extends TestCase
             ],
             'images' => ['zoom' => "https://images.example/bilka/{$number}.webp"],
             'catalog_id' => 'food-paper',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function nemligOffer(int $number): array
+    {
+        return [
+            'Id' => (string) (5070000 + $number),
+            'Name' => "Nemlig Product {$number}",
+            'Category' => 'Grønt',
+            'SubCategory' => 'Agurk / Tomat',
+            'PrimaryImage' => "https://www.nemlig.com/images/{$number}.jpg",
+            'UnitPrice' => '40,00 kr./Kg.',
+            'UnitPriceCalc' => 40,
+            'UnitPriceLabel' => 'kr./Kg.',
+            'Description' => '1,5 kg / Holland / Klasse 1',
+            'Price' => 110,
+            'Campaign' => [
+                'DiscountSavings' => 50,
+                'MaxQuantity' => 0,
+                'CampaignPrice' => 60,
+                'CampaignUnitPrice' => 40,
+                'Type' => 'ProductCampaignDiscount',
+                'Code' => 'US',
+                'IntervalStart' => '2026-05-31T22:00:00Z',
+                'IntervalEnd' => '2026-06-07T21:59:59Z',
+            ],
         ];
     }
 }

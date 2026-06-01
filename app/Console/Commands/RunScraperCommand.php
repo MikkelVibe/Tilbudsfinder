@@ -9,7 +9,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Throwable;
 
-#[Signature('scraper:run {grocer : The grocer scraper key, e.g. rema1000, netto, foetex, bilka, meny, spar, minkobmand, kvickly, superbrugsen, daglibrugsen, or 365discount} {--limit= : Limit discovered products/offers for live smoke tests} {--no-delay : Disable scraper politeness delays for tests only}')]
+#[Signature('scraper:run {grocer : The grocer scraper key, e.g. rema1000, nemlig, netto, foetex, bilka, meny, spar, minkobmand, kvickly, superbrugsen, daglibrugsen, or 365discount} {--limit= : Limit discovered products/offers for live smoke tests} {--no-delay : Disable scraper politeness delays for tests only}')]
 #[Description('Fetch and import active papers for a grocer scraper')]
 class RunScraperCommand extends Command
 {

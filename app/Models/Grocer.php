@@ -36,6 +36,11 @@ class Grocer extends Model
         return $this->hasMany(ScrapedOffer::class);
     }
 
+    public function grocerProducts(): HasMany
+    {
+        return $this->hasMany(GrocerProduct::class);
+    }
+
     public function normalizationFailures(): HasMany
     {
         return $this->hasMany(NormalizationFailure::class);

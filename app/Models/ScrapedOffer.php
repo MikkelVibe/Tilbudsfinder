@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['grocer_id', 'import_batch_id', 'paper_id', 'source_offer_id', 'source_product_id', 'title', 'description', 'image_url', 'price', 'currency', 'package_amount', 'package_unit_original', 'package_unit', 'compare_unit', 'unit_price', 'normalization_status', 'normalization_confidence', 'source_payload'])]
+#[Fillable(['grocer_id', 'import_batch_id', 'paper_id', 'grocer_product_id', 'source_offer_id', 'source_product_id', 'title', 'description', 'image_url', 'price', 'currency', 'package_amount', 'package_unit_original', 'package_unit', 'compare_unit', 'unit_price', 'normalization_status', 'normalization_confidence', 'source_payload'])]
 class ScrapedOffer extends Model
 {
     /** @use HasFactory<ScrapedOfferFactory> */
@@ -31,6 +31,11 @@ class ScrapedOffer extends Model
     public function paper(): BelongsTo
     {
         return $this->belongsTo(Paper::class);
+    }
+
+    public function grocerProduct(): BelongsTo
+    {
+        return $this->belongsTo(GrocerProduct::class);
     }
 
     public function normalizationFailures(): HasMany

@@ -48,6 +48,7 @@ class DatabaseSeeder extends Seeder
     {
         return [
             ['slug' => 'rema1000', 'name' => 'REMA 1000', 'website_url' => 'https://rema1000.dk'],
+            ['slug' => 'nemlig', 'name' => 'Nemlig', 'website_url' => 'https://www.nemlig.com'],
             ['slug' => 'netto', 'name' => 'Netto', 'website_url' => 'https://netto.dk'],
             ['slug' => 'foetex', 'name' => 'føtex', 'website_url' => 'https://www.foetex.dk'],
             ['slug' => 'bilka', 'name' => 'Bilka', 'website_url' => 'https://www.bilka.dk'],
