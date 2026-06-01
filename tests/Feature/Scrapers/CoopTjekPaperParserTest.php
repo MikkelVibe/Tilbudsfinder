@@ -27,7 +27,7 @@ class CoopTjekPaperParserTest extends TestCase
         $this->assertSame('Uge 23', $paper->title);
         $this->assertSame('2026-05-28 22:00:00', $paper->activeFrom->format('Y-m-d H:i:s'));
         $this->assertSame('2026-06-04 21:59:59', $paper->activeUntil->format('Y-m-d H:i:s'));
-        $this->assertCount(12, $paper->offers);
+        $this->assertCount(13, $paper->offers);
         $this->assertSame('Kvickly', $paper->metadata['dealer_name']);
         $this->assertSame(281, $paper->metadata['offer_count']);
         $this->assertSame(12, $paper->metadata['fetched_offer_count']);
@@ -36,13 +36,14 @@ class CoopTjekPaperParserTest extends TestCase
 
         $offer = $paper->offers[0];
 
-        $this->assertSame('Cirkel Kaffe, Gevalia eller Cafe Noir formalet kaffe', $offer->title);
+        $this->assertSame('COFFEE VARIANT 400 G', $offer->title);
         $this->assertSame(49, $offer->price);
-        $this->assertSame('Note: Maks. 3 | Flere varianter. 400-500 g. Kg-pris maks. 122,50. Frit valg. 1 stk. Maks. 3 stk. pr. kunde 400-500 g', $offer->packageText);
+        $this->assertSame('COFFEE VARIANT 400 G Note: Maks. 3 | Flere varianter. 400-500 g. Kg-pris maks. 122,50. Frit valg. 1 stk. Maks. 3 stk. pr. kunde 400-500 g', $offer->packageText);
         $this->assertSame('122,50', $offer->sourceUnitPrice);
         $this->assertSame('Maks. 3', $offer->purchaseLimitText);
-        $this->assertSame('coop-offer-1', $offer->sourceOfferId);
-        $this->assertSame('https://images.example/coop/1.webp', $offer->imageUrl);
+        $this->assertSame('coop-offer-1:5700000000011', $offer->sourceOfferId);
+        $this->assertSame('5700000000011', $offer->sourceProductId);
+        $this->assertSame('https://images.example/incito/coffee-400.webp', $offer->imageUrl);
         $this->assertSame(2, $offer->metadata['catalog_page']);
         $this->assertSame(2, $offer->metadata['incito_product_count']);
     }
@@ -57,13 +58,13 @@ class CoopTjekPaperParserTest extends TestCase
         $batch = (new ImportPersistencePipeline)->persist($grocer, $paper);
 
         $this->assertSame(ImportBatchStatus::Succeeded, $batch->status);
-        $this->assertSame(12, $batch->parsed_offer_count);
-        $this->assertSame(12, $batch->published_offer_count);
+        $this->assertSame(13, $batch->parsed_offer_count);
+        $this->assertSame(13, $batch->published_offer_count);
         $this->assertTrue(Storage::disk('local')->exists($batch->raw_payload_path));
 
         $this->assertSame(1, ImportBatch::query()->count());
         $this->assertSame(1, Paper::query()->where('source_external_id', 'coop-weekly-paper')->count());
-        $this->assertSame(12, ScrapedOffer::query()->count());
+        $this->assertSame(13, ScrapedOffer::query()->count());
 
         $butter = ScrapedOffer::query()->where('source_offer_id', 'coop-offer-2')->firstOrFail();
 
@@ -74,16 +75,17 @@ class CoopTjekPaperParserTest extends TestCase
         $this->assertSame('100.00', $butter->unit_price);
         $this->assertSame(NormalizationStatus::Succeeded, $butter->normalization_status);
 
-        $coffee = ScrapedOffer::query()->where('source_offer_id', 'coop-offer-1')->firstOrFail();
+        $coffee = ScrapedOffer::query()->where('source_offer_id', 'coop-offer-1:5700000000011')->firstOrFail();
 
-        $this->assertSame('5700000000011', $coffee->source_payload['_incito_enrichment']['products'][0]['id']);
-        $this->assertSame('COFFEE VARIANT 400 G', $coffee->source_payload['_incito_enrichment']['products'][0]['title']);
+        $this->assertSame('5700000000011', $coffee->source_product_id);
+        $this->assertSame('5700000000011', $coffee->source_payload['_incito_product']['id']);
+        $this->assertSame('COFFEE VARIANT 400 G', $coffee->source_payload['_incito_product']['title']);
     }
 
     public function test_it_rejects_coop_tjek_payload_with_too_few_offers(): void
     {
         $payload = json_decode($this->payload(), true, flags: JSON_THROW_ON_ERROR);
-        $payload['offers'] = array_slice($payload['offers'], 0, 9);
+        $payload['offers'] = array_slice($payload['offers'], 2, 9);
 
         $this->expectException(ScraperParseException::class);
         $this->expectExceptionMessage('COOP Tjek paper must contain at least 10 parsed offers.');

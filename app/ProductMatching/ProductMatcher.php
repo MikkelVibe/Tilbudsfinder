@@ -21,7 +21,7 @@ class ProductMatcher
         $result = ['matched' => 0, 'ambiguous' => 0, 'skipped' => 0, 'conflicts' => 0];
 
         $batch->scrapedOffers()
-            ->with(['paper', 'productMatch'])
+            ->with(['grocer', 'paper', 'productMatch'])
             ->orderBy('id')
             ->each(function (ScrapedOffer $offer) use (&$result): void {
                 $status = $this->matchOffer($offer);
@@ -187,19 +187,36 @@ class ProductMatcher
      */
     private function barcodes(ScrapedOffer $offer): array
     {
-        $barcodes = Arr::get($offer->source_payload, 'product_detail.bar_codes')
-            ?? Arr::get($offer->source_payload, 'catalog_product.bar_codes')
-            ?? Arr::get($offer->source_payload, 'algolia.bar_codes')
-            ?? Arr::get($offer->source_payload, 'metadata.bar_codes')
-            ?? [];
+        if ($offer->grocer?->slug !== null && in_array($offer->grocer->slug, ['meny', 'spar', 'minkobmand'], true)) {
+            return $this->eanLikeValues([$offer->source_product_id]);
+        }
+
+        $barcodes = match ($offer->grocer?->slug) {
+            'rema1000' => Arr::get($offer->source_payload, 'product_detail.bar_codes')
+                ?? Arr::get($offer->source_payload, 'catalog_product.bar_codes')
+                ?? Arr::get($offer->source_payload, 'algolia.bar_codes')
+                ?? [],
+            '365discount', 'kvickly', 'superbrugsen', 'daglibrugsen' => [Arr::get($offer->source_payload, '_incito_product.id')],
+            'bilka', 'foetex' => Arr::get($offer->source_payload, '_salling_enrichment.eans', []),
+            default => [],
+        };
 
         if (! is_array($barcodes)) {
             return [];
         }
 
+        return $this->eanLikeValues($barcodes);
+    }
+
+    /**
+     * @param  list<mixed>  $values
+     * @return list<string>
+     */
+    private function eanLikeValues(array $values): array
+    {
         return array_values(array_unique(array_filter(array_map(
             fn (mixed $barcode): ?string => is_scalar($barcode) && preg_match('/^\d{8,14}$/', (string) $barcode) === 1 ? (string) $barcode : null,
-            $barcodes,
+            $values,
         ))));
     }
 

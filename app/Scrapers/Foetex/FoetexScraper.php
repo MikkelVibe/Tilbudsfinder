@@ -6,6 +6,7 @@ use App\Imports\DTO\ParsedPaperInput;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
+use App\Scrapers\Salling\SallingOfferEnricher;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
@@ -23,6 +24,7 @@ class FoetexScraper implements GrocerScraper
 
     public function __construct(
         private readonly FoetexPaperParser $parser = new FoetexPaperParser,
+        private readonly SallingOfferEnricher $sallingOfferEnricher = new SallingOfferEnricher,
     ) {}
 
     public function grocerKey(): string
@@ -52,6 +54,10 @@ class FoetexScraper implements GrocerScraper
             $this->progress($progress, "Fetching føtex offers for catalog {$catalogId}...");
             $offers = $this->fetchCatalogOffers($catalogId, $limit);
             $this->progress($progress, 'Fetched '.count($offers)." føtex offers for catalog {$catalogId}.".($limit ? ' after limit' : ''));
+
+            $this->progress($progress, 'Enriching føtex offers with Salling EAN catalog matches...');
+            $offers = $this->sallingOfferEnricher->enrich('foetex', $offers);
+            $this->progress($progress, 'Enriched '.$this->sallingOfferEnricher->enrichedCount($offers).' føtex offers with Salling EANs.');
 
             return $this->rawPayload($catalog, $offers);
         }, $weeklyCatalogs);
@@ -149,6 +155,7 @@ class FoetexScraper implements GrocerScraper
             'catalog' => [
                 ...$catalog,
                 'source_strategy' => 'tjek_weekly_catalog_offers',
+                'salling_enriched_offer_count' => $this->sallingOfferEnricher->enrichedCount($offers),
                 'fetched_offer_count' => count($offers),
                 'offer_count_mismatch' => is_numeric(Arr::get($catalog, 'offer_count')) ? (int) Arr::get($catalog, 'offer_count') - count($offers) : null,
             ],

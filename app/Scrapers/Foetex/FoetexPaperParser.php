@@ -39,6 +39,7 @@ class FoetexPaperParser
                 'offer_count' => Arr::get($catalog, 'offer_count'),
                 'fetched_offer_count' => Arr::get($catalog, 'fetched_offer_count'),
                 'offer_count_mismatch' => Arr::get($catalog, 'offer_count_mismatch'),
+                'salling_enriched_offer_count' => Arr::get($catalog, 'salling_enriched_offer_count'),
                 'page_count' => Arr::get($catalog, 'page_count'),
                 'pdf_url' => $this->optionalString($catalog, 'pdf_url'),
                 'source_strategy' => $this->optionalString($catalog, 'source_strategy'),
@@ -115,6 +116,7 @@ class FoetexPaperParser
             description: $this->optionalString($offer, 'description'),
             imageUrl: $this->imageUrl($offer),
             sourceOfferId: $this->optionalString($offer, 'id'),
+            sourceProductId: $this->sallingSourceProductId($offer),
             purchaseLimitText: $this->purchaseLimitText($offer),
             metadata: array_filter([
                 'catalog_page' => Arr::get($offer, 'catalog_page'),
@@ -224,6 +226,14 @@ class FoetexPaperParser
         }
 
         throw new ScraperParseException('føtex paper produced zero publishable offers.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
+    private function sallingSourceProductId(array $offer): ?string
+    {
+        return $this->optionalString($offer, '_salling_enrichment.source_product_id');
     }
 
     /**

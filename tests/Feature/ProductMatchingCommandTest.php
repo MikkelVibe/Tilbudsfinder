@@ -89,6 +89,76 @@ class ProductMatchingCommandTest extends TestCase
         $this->assertDatabaseHas('product_matches', ['status' => 'matched', 'canonical_product_id' => $product->id]);
     }
 
+    public function test_it_matches_dagrofa_numeric_sku_to_existing_rema_ean_product(): void
+    {
+        $rema = Grocer::factory()->create(['slug' => 'rema1000']);
+        $dagrofa = Grocer::factory()->create(['slug' => 'spar']);
+        $remaBatch = ImportBatch::factory()->for($rema)->create(['status' => ImportBatchStatus::Succeeded]);
+        $dagrofaBatch = ImportBatch::factory()->for($dagrofa)->create(['status' => ImportBatchStatus::Succeeded]);
+        $remaPaper = Paper::factory()->for($rema)->for($remaBatch)->create();
+        $dagrofaPaper = Paper::factory()->for($dagrofa)->for($dagrofaBatch)->create();
+
+        ScrapedOffer::factory()->for($rema)->for($remaBatch)->for($remaPaper)->create([
+            'title' => 'HOTDOG PØLSER',
+            'source_product_id' => '60055',
+            'source_payload' => $this->sourcePayload(['5707196133561']),
+        ]);
+
+        ScrapedOffer::factory()->for($dagrofa)->for($dagrofaBatch)->for($dagrofaPaper)->create([
+            'title' => 'Steff-H Hotdog Pølser',
+            'source_product_id' => '5707196133561',
+            'source_payload' => ['sku' => '5707196133561', 'productDisplayName' => 'Steff-H Hotdog Pølser'],
+        ]);
+
+        $this->artisan("products:match {$remaBatch->id}")->assertSuccessful();
+        $this->artisan("products:match {$dagrofaBatch->id}")->assertSuccessful();
+
+        $product = CanonicalProduct::query()->firstOrFail();
+
+        $this->assertSame(1, CanonicalProduct::query()->count());
+        $this->assertSame(2, PriceObservation::query()->count());
+        $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'ean', 'value' => '5707196133561', 'grocer_id' => null]);
+        $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'source_product_id', 'value' => '5707196133561', 'grocer_id' => $dagrofa->id]);
+    }
+
+    public function test_it_matches_salling_enriched_offer_to_existing_ean_product(): void
+    {
+        $rema = Grocer::factory()->create(['slug' => 'rema1000']);
+        $bilka = Grocer::factory()->create(['slug' => 'bilka']);
+        $remaBatch = ImportBatch::factory()->for($rema)->create(['status' => ImportBatchStatus::Succeeded]);
+        $bilkaBatch = ImportBatch::factory()->for($bilka)->create(['status' => ImportBatchStatus::Succeeded]);
+        $remaPaper = Paper::factory()->for($rema)->for($remaBatch)->create();
+        $bilkaPaper = Paper::factory()->for($bilka)->for($bilkaBatch)->create();
+
+        ScrapedOffer::factory()->for($rema)->for($remaBatch)->for($remaPaper)->create([
+            'title' => 'Agurk',
+            'source_product_id' => '41286',
+            'source_payload' => $this->sourcePayload(['5711044475956']),
+        ]);
+
+        ScrapedOffer::factory()->for($bilka)->for($bilkaBatch)->for($bilkaPaper)->create([
+            'title' => 'Agurk',
+            'source_product_id' => 'salling-product-1',
+            'source_payload' => [
+                'heading' => 'Agurk',
+                '_salling_enrichment' => [
+                    'source_product_id' => 'salling-product-1',
+                    'eans' => ['5711044475956'],
+                ],
+            ],
+        ]);
+
+        $this->artisan("products:match {$remaBatch->id}")->assertSuccessful();
+        $this->artisan("products:match {$bilkaBatch->id}")->assertSuccessful();
+
+        $product = CanonicalProduct::query()->firstOrFail();
+
+        $this->assertSame(1, CanonicalProduct::query()->count());
+        $this->assertSame(2, PriceObservation::query()->count());
+        $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'ean', 'value' => '5711044475956', 'grocer_id' => null]);
+        $this->assertDatabaseHas('product_identifiers', ['canonical_product_id' => $product->id, 'type' => 'source_product_id', 'value' => 'salling-product-1', 'grocer_id' => $bilka->id]);
+    }
+
     /**
      * @param  list<string>  $barcodes
      * @return array<string, mixed>

@@ -97,7 +97,7 @@ class CoopTjekPaperParser
                 throw new ScraperParseException("COOP Tjek offer at index {$index} must be an object.");
             }
 
-            $parsedOffers[] = $this->parseOffer($offer);
+            array_push($parsedOffers, ...$this->parseOffer($offer));
         }
 
         return $parsedOffers;
@@ -105,8 +105,23 @@ class CoopTjekPaperParser
 
     /**
      * @param  array<string, mixed>  $offer
+     * @return list<ParsedOfferInput>
      */
-    private function parseOffer(array $offer): ParsedOfferInput
+    private function parseOffer(array $offer): array
+    {
+        $products = $this->incitoProducts($offer);
+
+        if ($products === []) {
+            return [$this->parseGroupedOffer($offer)];
+        }
+
+        return array_map(fn (array $product): ParsedOfferInput => $this->parseIncitoProductOffer($offer, $product), $products);
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     */
+    private function parseGroupedOffer(array $offer): ParsedOfferInput
     {
         return new ParsedOfferInput(
             title: $this->requiredString($offer, 'heading'),
@@ -127,6 +142,71 @@ class CoopTjekPaperParser
             ], static fn (mixed $value): bool => $value !== null),
             sourcePayload: $offer,
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     * @param  array<string, mixed>  $product
+     */
+    private function parseIncitoProductOffer(array $offer, array $product): ParsedOfferInput
+    {
+        $productId = $this->optionalScalarString($product, 'id');
+
+        return new ParsedOfferInput(
+            title: $this->requiredString($product, 'title'),
+            price: Arr::get($offer, 'pricing.price'),
+            packageText: $this->productPackageText($product, $offer),
+            sourceUnitPrice: $this->sourceUnitPrice($offer),
+            description: $this->optionalString($offer, 'description'),
+            imageUrl: $this->optionalString($product, 'image') ?? $this->imageUrl($offer),
+            sourceOfferId: $this->optionalString($offer, 'id').($productId !== null ? ':'.$productId : ''),
+            sourceProductId: $productId,
+            isConditional: $this->isConditional($offer),
+            purchaseLimitText: $this->purchaseLimitText($offer),
+            metadata: array_filter([
+                'catalog_page' => Arr::get($offer, 'catalog_page'),
+                'catalog_id' => $this->optionalString($offer, 'catalog_id'),
+                'original_offer_id' => $this->optionalString($offer, 'id'),
+                'original_offer_title' => $this->optionalString($offer, 'heading'),
+                'incito_offer_id' => $this->optionalString($offer, '_incito_enrichment.offer_id'),
+                'incito_product_id' => $productId,
+                'incito_product_count' => is_array(Arr::get($offer, '_incito_enrichment.products')) ? count(Arr::get($offer, '_incito_enrichment.products')) : null,
+                'run_from' => $this->optionalString($offer, 'run_from'),
+                'run_till' => $this->optionalString($offer, 'run_till'),
+            ], static fn (mixed $value): bool => $value !== null),
+            sourcePayload: [
+                ...$offer,
+                '_incito_product' => $product,
+            ],
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $offer
+     * @return list<array<string, mixed>>
+     */
+    private function incitoProducts(array $offer): array
+    {
+        $products = Arr::get($offer, '_incito_enrichment.products');
+
+        if (! is_array($products)) {
+            return [];
+        }
+
+        return array_values(array_filter($products, 'is_array'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $product
+     * @param  array<string, mixed>  $offer
+     */
+    private function productPackageText(array $product, array $offer): ?string
+    {
+        return trim(implode(' ', array_filter([
+            $this->optionalString($product, 'title'),
+            $this->optionalString($offer, 'description'),
+            $this->quantityText($offer),
+        ], static fn (?string $value): bool => $value !== null && trim($value) !== ''))) ?: null;
     }
 
     /**
@@ -262,6 +342,20 @@ class CoopTjekPaperParser
 
         if (is_string($value) && trim($value) !== '') {
             return $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function optionalScalarString(array $payload, string $key): ?string
+    {
+        $value = Arr::get($payload, $key);
+
+        if ((is_string($value) || is_int($value)) && trim((string) $value) !== '') {
+            return (string) $value;
         }
 
         return null;
