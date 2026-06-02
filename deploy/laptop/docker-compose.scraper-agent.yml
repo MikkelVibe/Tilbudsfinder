@@ -11,6 +11,8 @@ services:
       SCRAPER_AGENT_VERSION: ${SCRAPER_AGENT_VERSION:-local}
     command:
       - php
+      - -d
+      - memory_limit=4G
       - artisan
       - scraper-agent:work
       - --server=${SCRAPER_AGENT_SERVER}
