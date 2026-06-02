@@ -3,9 +3,11 @@
 namespace App\Scrapers\Rema1000;
 
 use App\Imports\DTO\ParsedPaperInput;
+use App\Scrapers\DTO\PaperCandidate;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
+use App\Scrapers\Support\KnownPaperPayload;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
@@ -50,7 +52,7 @@ class Rema1000Scraper implements GrocerScraper
     /**
      * @return list<RawPaperPayload>
      */
-    public function fetchPapers(?int $limit = null, ?callable $progress = null): array
+    public function discoverPapers(?callable $progress = null): array
     {
         $this->progress($progress, 'Fetching REMA 1000 Tjek catalogs...');
         $catalogs = $this->fetchActiveCatalogs();
@@ -58,6 +60,29 @@ class Rema1000Scraper implements GrocerScraper
 
         $weeklyCatalogs = array_values(array_filter($catalogs, fn (array $catalog): bool => $this->isWeeklyCatalog($catalog)));
         $this->progress($progress, 'Found '.count($weeklyCatalogs).' active REMA 1000 Uge catalogs eligible for publishing.');
+
+        if ($weeklyCatalogs === []) {
+            throw new ScraperFetchException('REMA 1000 found no active Uge catalogs.');
+        }
+
+        return array_map(fn (array $catalog): PaperCandidate => $this->candidate($catalog), $weeklyCatalogs);
+    }
+
+    /**
+     * @param  list<PaperCandidate>  $candidates
+     * @param  array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>  $knownPapers
+     * @return list<RawPaperPayload>
+     */
+    public function fetchPapers(array $candidates, array $knownPapers = [], ?int $limit = null, ?callable $progress = null): array
+    {
+        $knownPayloads = $this->knownPayloads($candidates, $knownPapers, $progress);
+        $newCandidates = $this->newCandidates($candidates, $knownPapers);
+
+        if ($newCandidates === []) {
+            return $knownPayloads;
+        }
+
+        $catalogs = array_map(fn (PaperCandidate $candidate): array => $candidate->sourcePayload, $newCandidates);
 
         $this->progress($progress, 'Fetching REMA 1000 Algolia avisvare products...');
         $algoliaProducts = $this->fetchAvisvarerProducts($limit);
@@ -86,10 +111,12 @@ class Rema1000Scraper implements GrocerScraper
             $this->progress($progress, 'Grouped '.count($offers).' products into '.($this->optionalString($catalog ?? [], 'label') ?? $catalogId).'.');
         }
 
-        return array_map(
+        $payloads = array_map(
             fn (array $catalog): RawPaperPayload => $this->rawPayload($catalog, $groupedOffers[$this->requiredString($catalog, 'id')]),
-            array_values(array_filter($catalogs, fn (array $catalog): bool => $this->isWeeklyCatalog($catalog) && isset($groupedOffers[$this->requiredString($catalog, 'id')]))),
+            array_values(array_filter($catalogs, fn (array $catalog): bool => isset($groupedOffers[$this->requiredString($catalog, 'id')]))),
         );
+
+        return [...$knownPayloads, ...$payloads];
     }
 
     public function parse(RawPaperPayload $payload): ParsedPaperInput
@@ -351,6 +378,51 @@ class Rema1000Scraper implements GrocerScraper
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $catalog
+     */
+    private function candidate(array $catalog): PaperCandidate
+    {
+        return new PaperCandidate(
+            sourceExternalId: $this->requiredString($catalog, 'id'),
+            title: $this->optionalString($catalog, 'label'),
+            sourcePayload: $catalog,
+        );
+    }
+
+    /**
+     * @param  list<PaperCandidate>  $candidates
+     * @param  array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>  $knownPapers
+     * @return list<RawPaperPayload>
+     */
+    private function knownPayloads(array $candidates, array $knownPapers, ?callable $progress): array
+    {
+        $payloads = [];
+
+        foreach ($candidates as $candidate) {
+            $knownPaper = $knownPapers[$candidate->sourceExternalId] ?? null;
+
+            if (($knownPaper['exists'] ?? false) !== true) {
+                continue;
+            }
+
+            $this->progress($progress, "Skipping already imported REMA 1000 catalog {$candidate->sourceExternalId} before product detail fetch.");
+            $payloads[] = KnownPaperPayload::make($this->grocerKey(), $candidate, $knownPaper);
+        }
+
+        return $payloads;
+    }
+
+    /**
+     * @param  list<PaperCandidate>  $candidates
+     * @param  array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>  $knownPapers
+     * @return list<PaperCandidate>
+     */
+    private function newCandidates(array $candidates, array $knownPapers): array
+    {
+        return array_values(array_filter($candidates, fn (PaperCandidate $candidate): bool => ($knownPapers[$candidate->sourceExternalId]['exists'] ?? false) !== true));
     }
 
     private function progress(?callable $progress, string $message): void

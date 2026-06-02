@@ -8,6 +8,7 @@ use App\Enums\ScraperAgentStatus;
 use App\Models\ScrapeJob;
 use App\Models\ScraperAgent;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -38,6 +39,7 @@ class ScrapeJobWorker
                 sleepBetweenDetailRequests: true,
                 progress: $progress,
                 scrapeJob: $job,
+                skipKnown: true,
             );
 
             $status = $result->importedPaperCount > 0
@@ -120,7 +122,6 @@ class ScrapeJobWorker
             $job->grocer->update([
                 'health_status' => GrocerHealthStatus::Healthy,
                 'last_success_at' => now(),
-                'next_expected_import_at' => $this->nextDailyImportAt(),
             ]);
         });
     }
@@ -133,11 +134,12 @@ class ScrapeJobWorker
     public function markFailed(ScrapeJob $job, string $failureReason): void
     {
         DB::transaction(function () use ($job, $failureReason): void {
-            $hasAttemptsRemaining = $job->attempt < $job->max_attempts;
+            $retryAt = $this->nextRetryAt($job);
+            $hasRetryTimeRemaining = $retryAt !== null;
 
             $job->update([
-                'status' => $hasAttemptsRemaining ? ScrapeJobStatus::Retrying : ScrapeJobStatus::Failed,
-                'scheduled_for' => $hasAttemptsRemaining ? now()->addMinutes($this->retryDelayMinutes($job->attempt)) : $job->scheduled_for,
+                'status' => $hasRetryTimeRemaining ? ScrapeJobStatus::Retrying : ScrapeJobStatus::Failed,
+                'scheduled_for' => $hasRetryTimeRemaining ? $retryAt : $job->scheduled_for,
                 'leased_until' => null,
                 'finished_at' => now(),
                 'failure_reason' => $failureReason,
@@ -148,30 +150,38 @@ class ScrapeJobWorker
             ]);
 
             $job->grocer->update([
-                'health_status' => $hasAttemptsRemaining ? GrocerHealthStatus::Failing : GrocerHealthStatus::Stale,
+                'health_status' => $hasRetryTimeRemaining ? GrocerHealthStatus::Failing : GrocerHealthStatus::Stale,
                 'last_failure_at' => now(),
-                'next_expected_import_at' => $hasAttemptsRemaining ? $job->scheduled_for : $this->nextDailyImportAt(),
             ]);
         });
     }
 
     private function retryDelayMinutes(int $attempt): int
     {
-        return match ($attempt) {
-            1 => 30,
-            default => 120,
-        };
+        return min(30 * (2 ** max(0, $attempt - 1)), 240);
     }
 
-    private function nextDailyImportAt(): CarbonImmutable
+    private function nextRetryAt(ScrapeJob $job): ?CarbonImmutable
     {
-        $next = now('Europe/Copenhagen')->setTime(4, 0);
+        $next = now()->addMinutes($this->retryDelayMinutes($job->attempt))->toImmutable();
+        $midnight = $this->scrapeDateMidnight($job);
 
-        if ($next->lessThanOrEqualTo(now('Europe/Copenhagen'))) {
-            $next = $next->addDay();
+        if ($next->greaterThanOrEqualTo($midnight)) {
+            return null;
         }
 
-        return $next->utc()->toImmutable();
+        return $next;
+    }
+
+    private function scrapeDateMidnight(ScrapeJob $job): CarbonImmutable
+    {
+        $scrapeDate = $job->scrape_date?->timezone('Europe/Copenhagen')->toDateString()
+            ?? now('Europe/Copenhagen')->toDateString();
+
+        return Carbon::parse($scrapeDate, 'Europe/Copenhagen')
+            ->addDay()
+            ->utc()
+            ->toImmutable();
     }
 
     private function progress(?callable $progress, string $message): void

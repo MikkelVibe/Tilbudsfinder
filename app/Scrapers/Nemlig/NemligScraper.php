@@ -3,9 +3,11 @@
 namespace App\Scrapers\Nemlig;
 
 use App\Imports\DTO\ParsedPaperInput;
+use App\Scrapers\DTO\PaperCandidate;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
+use App\Scrapers\Support\KnownPaperPayload;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
@@ -38,7 +40,7 @@ class NemligScraper implements GrocerScraper
     /**
      * @return list<RawPaperPayload>
      */
-    public function fetchPapers(?int $limit = null, ?callable $progress = null): array
+    public function discoverPapers(?callable $progress = null): array
     {
         $this->progress($progress, 'Fetching Nemlig offers page...');
 
@@ -49,6 +51,35 @@ class NemligScraper implements GrocerScraper
         if ($groups === []) {
             throw new ScraperFetchException('Nemlig offers page returned no product groups.');
         }
+
+        $candidate = $this->candidate($settings, $groups);
+
+        return [$candidate];
+    }
+
+    /**
+     * @param  list<PaperCandidate>  $candidates
+     * @param  array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>  $knownPapers
+     * @return list<RawPaperPayload>
+     */
+    public function fetchPapers(array $candidates, array $knownPapers = [], ?int $limit = null, ?callable $progress = null): array
+    {
+        $candidate = $candidates[0] ?? null;
+
+        if (! $candidate) {
+            return [];
+        }
+
+        $knownPaper = $knownPapers[$candidate->sourceExternalId] ?? null;
+
+        if (($knownPaper['exists'] ?? false) === true) {
+            $this->progress($progress, "Skipping already imported Nemlig paper {$candidate->sourceExternalId}.");
+
+            return [KnownPaperPayload::make($this->grocerKey(), $candidate, $knownPaper)];
+        }
+
+        $settings = $this->arrayValue($candidate->sourcePayload, 'settings');
+        $groups = $this->arrayValue($candidate->sourcePayload, 'groups');
 
         $token = $this->fetchAccessToken();
         $products = [];
@@ -94,7 +125,7 @@ class NemligScraper implements GrocerScraper
 
         $this->progress($progress, 'Fetched '.count($products).' Nemlig campaign products from '.count($groupsFetched).' groups.');
 
-        return [$this->rawPayload($settings, $groupsFetched, $products)];
+        return [$this->rawPayload($candidate, $settings, $groupsFetched, $products)];
     }
 
     public function parse(RawPaperPayload $payload): ParsedPaperInput
@@ -292,16 +323,15 @@ class NemligScraper implements GrocerScraper
      * @param  list<array<string, mixed>>  $groupsFetched
      * @param  list<array<string, mixed>>  $products
      */
-    private function rawPayload(array $settings, array $groupsFetched, array $products): RawPaperPayload
+    private function rawPayload(PaperCandidate $candidate, array $settings, array $groupsFetched, array $products): RawPaperPayload
     {
         $campaignDates = $this->campaignDates($products);
         $activeFrom = $campaignDates['active_from'] ?? CarbonImmutable::now()->startOfDay();
         $activeUntil = $campaignDates['active_until'] ?? CarbonImmutable::now()->endOfDay();
-        $sourceExternalId = 'nemlig-'.$activeFrom->format('Y-m-d').'-'.$activeUntil->format('Y-m-d');
 
         $rawPayload = $this->encode([
             'catalog' => [
-                'id' => $sourceExternalId,
+                'id' => $candidate->sourceExternalId,
                 'label' => 'Nemlig tilbud '.$activeFrom->format('Y-m-d').' - '.$activeUntil->format('Y-m-d'),
                 'run_from' => $activeFrom->toIso8601String(),
                 'run_till' => $activeUntil->toIso8601String(),
@@ -321,9 +351,31 @@ class NemligScraper implements GrocerScraper
         ]);
 
         return new RawPaperPayload(
-            sourceExternalId: $sourceExternalId,
+            sourceExternalId: $candidate->sourceExternalId,
             rawPayload: $rawPayload,
             title: 'Nemlig tilbud',
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     * @param  list<array<string, mixed>>  $groups
+     */
+    private function candidate(array $settings, array $groups): PaperCandidate
+    {
+        $timestamp = $this->optionalString($settings, 'CombinedProductsAndSitecoreTimestamp')
+            ?? $this->optionalString($settings, 'ProductsImportedTimestamp')
+            ?? CarbonImmutable::now()->format('Y-m-d');
+        $timeslot = $this->optionalString($settings, 'TimeslotUtc') ?? 'unknown-timeslot';
+        $sourceExternalId = 'nemlig-'.$timestamp.'-'.$timeslot;
+
+        return new PaperCandidate(
+            sourceExternalId: $sourceExternalId,
+            title: 'Nemlig tilbud',
+            sourcePayload: [
+                'settings' => $settings,
+                'groups' => $groups,
+            ],
         );
     }
 

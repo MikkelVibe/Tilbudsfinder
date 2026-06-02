@@ -18,6 +18,7 @@ class ScrapeJobFactory extends Factory
         return [
             'grocer_id' => Grocer::factory(),
             'scraper_agent_id' => ScraperAgent::factory(),
+            'scrape_date' => now('Europe/Copenhagen')->toDateString(),
             'status' => ScrapeJobStatus::Pending,
             'attempt' => 0,
             'max_attempts' => 3,

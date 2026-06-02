@@ -2,12 +2,14 @@
 
 namespace App\Scrapers\DTO;
 
-readonly class RawPaperPayload
+readonly class PaperCandidate
 {
+    /**
+     * @param  array<string, mixed>  $sourcePayload
+     */
     public function __construct(
         public string $sourceExternalId,
-        public string $rawPayload,
         public ?string $title = null,
-        public bool $alreadyFetched = false,
+        public array $sourcePayload = [],
     ) {}
 }

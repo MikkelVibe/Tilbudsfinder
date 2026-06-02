@@ -3,9 +3,11 @@
 namespace App\Scrapers\Bilka;
 
 use App\Imports\DTO\ParsedPaperInput;
+use App\Scrapers\DTO\PaperCandidate;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
+use App\Scrapers\Support\KnownPaperPayload;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
@@ -56,7 +58,7 @@ class BilkaScraper implements GrocerScraper
     /**
      * @return list<RawPaperPayload>
      */
-    public function fetchPapers(?int $limit = null, ?callable $progress = null): array
+    public function discoverPapers(?callable $progress = null): array
     {
         $this->progress($progress, 'Fetching Bilka Tjek catalogs...');
         $catalogs = $this->fetchActiveCatalogs();
@@ -69,15 +71,31 @@ class BilkaScraper implements GrocerScraper
             throw new ScraperFetchException('Bilka found no active Food Uge catalogs.');
         }
 
-        return array_map(function (array $catalog) use ($limit, $progress): RawPaperPayload {
-            $catalogId = $this->requiredString($catalog, 'id');
+        return array_map(fn (array $catalog): PaperCandidate => $this->candidate($catalog), $foodCatalogs);
+    }
 
-            $this->progress($progress, "Fetching BilkaToGo food leaflet products for catalog {$catalogId}...");
+    /**
+     * @param  list<PaperCandidate>  $candidates
+     * @param  array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>  $knownPapers
+     * @return list<RawPaperPayload>
+     */
+    public function fetchPapers(array $candidates, array $knownPapers = [], ?int $limit = null, ?callable $progress = null): array
+    {
+        return array_map(function (PaperCandidate $candidate) use ($knownPapers, $limit, $progress): RawPaperPayload {
+            $knownPaper = $knownPapers[$candidate->sourceExternalId] ?? null;
+
+            if (($knownPaper['exists'] ?? false) === true) {
+                $this->progress($progress, "Skipping already imported Bilka catalog {$candidate->sourceExternalId}.");
+
+                return KnownPaperPayload::make($this->grocerKey(), $candidate, $knownPaper);
+            }
+
+            $this->progress($progress, "Fetching BilkaToGo food leaflet products for catalog {$candidate->sourceExternalId}...");
             $offers = $this->fetchBilkaToGoFoodLeafletProducts($limit);
             $this->progress($progress, 'Fetched '.count($offers).' BilkaToGo food leaflet products.'.($limit ? ' after limit' : ''));
 
-            return $this->rawPayload($catalog, $offers);
-        }, $foodCatalogs);
+            return $this->rawPayload($candidate->sourcePayload, $offers);
+        }, $candidates);
     }
 
     public function parse(RawPaperPayload $payload): ParsedPaperInput
@@ -181,6 +199,18 @@ class BilkaScraper implements GrocerScraper
         }
 
         return $offers;
+    }
+
+    /**
+     * @param  array<string, mixed>  $catalog
+     */
+    private function candidate(array $catalog): PaperCandidate
+    {
+        return new PaperCandidate(
+            sourceExternalId: $this->requiredString($catalog, 'id'),
+            title: $this->optionalString($catalog, 'label'),
+            sourcePayload: $catalog,
+        );
     }
 
     /**

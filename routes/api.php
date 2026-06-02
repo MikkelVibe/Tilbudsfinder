@@ -9,6 +9,7 @@ Route::prefix('scraper-agent')
         Route::get('version', [ScraperAgentController::class, 'version']);
         Route::post('heartbeat', [ScraperAgentController::class, 'heartbeat']);
         Route::post('update-status', [ScraperAgentController::class, 'updateStatus']);
+        Route::post('papers/exists', [ScraperAgentController::class, 'knownPapers']);
         Route::post('jobs/claim', [ScraperAgentController::class, 'claimJob']);
         Route::post('jobs/{scrapeJob}/fail', [ScraperAgentController::class, 'failJob']);
         Route::post('jobs/{scrapeJob}/raw-payloads', [ScraperAgentController::class, 'storeRawPayloads']);

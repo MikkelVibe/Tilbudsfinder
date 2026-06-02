@@ -23,9 +23,10 @@ class ScraperRunService
 {
     public function __construct(
         private readonly ImportPersistencePipeline $pipeline = new ImportPersistencePipeline,
+        private readonly PaperExistenceChecker $paperExistenceChecker = new PaperExistenceChecker,
     ) {}
 
-    public function run(string $grocerKey, ?int $limit = null, bool $sleepBetweenDetailRequests = true, ?callable $progress = null, ?ScrapeJob $scrapeJob = null): ScraperRunResult
+    public function run(string $grocerKey, ?int $limit = null, bool $sleepBetweenDetailRequests = true, ?callable $progress = null, ?ScrapeJob $scrapeJob = null, bool $skipKnown = false): ScraperRunResult
     {
         $scraper = $this->scraper($grocerKey, $sleepBetweenDetailRequests);
         $grocer = Grocer::query()->where('slug', $scraper->grocerKey())->first();
@@ -34,11 +35,22 @@ class ScraperRunService
             throw new ScraperRunException("Grocer [{$scraper->grocerKey()}] does not exist.");
         }
 
-        $payloads = $scraper->fetchPapers($limit, $progress);
+        $candidates = $scraper->discoverPapers($progress);
+        $knownPapers = $skipKnown
+            ? $this->paperExistenceChecker->check($scraper->grocerKey(), array_map(fn ($candidate): string => $candidate->sourceExternalId, $candidates))
+            : [];
+        $payloads = $scraper->fetchPapers($candidates, $knownPapers, $limit, $progress);
         $importedCount = 0;
         $skippedDuplicateCount = 0;
 
         foreach ($payloads as $payload) {
+            if ($payload->alreadyFetched) {
+                $skippedDuplicateCount++;
+                $this->progress($progress, "Skipped already imported paper {$payload->sourceExternalId}.");
+
+                continue;
+            }
+
             try {
                 $this->progress($progress, "Importing paper {$payload->sourceExternalId} ({$payload->title})...");
                 $this->pipeline->persist($grocer, $scraper->parse($payload), $scrapeJob);

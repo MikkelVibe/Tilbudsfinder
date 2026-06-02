@@ -19,41 +19,79 @@ class ScrapeAutomationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_schedules_due_enabled_grocers_once(): void
+    public function test_it_waits_until_two_am_copenhagen_before_scheduling_daily_cycles(): void
     {
-        CarbonImmutable::setTestNow('2026-06-01 03:00:00');
-        $dueGrocer = Grocer::factory()->create([
+        CarbonImmutable::setTestNow('2026-06-01 23:30:00');
+        Grocer::factory()->create([
             'slug' => 'rema1000',
-            'next_expected_import_at' => now()->subMinute(),
-        ]);
-        Grocer::factory()->create([
-            'slug' => 'future',
-            'next_expected_import_at' => now()->addHour(),
-        ]);
-        Grocer::factory()->create([
-            'slug' => 'disabled',
-            'is_enabled' => false,
-            'next_expected_import_at' => now()->subMinute(),
-        ]);
-        ScrapeJob::factory()->for($dueGrocer)->create([
-            'status' => ScrapeJobStatus::Pending,
-            'scheduled_for' => now()->subMinute(),
         ]);
 
         $this->artisan('scraper:schedule')
             ->expectsOutput('Scheduled scrape jobs: 0')
             ->assertSuccessful();
 
-        $this->assertSame(1, ScrapeJob::query()->count());
+        $this->assertSame(0, ScrapeJob::query()->count());
+    }
 
-        ScrapeJob::query()->delete();
+    public function test_it_schedules_one_daily_cycle_per_enabled_grocer_after_two_am_copenhagen(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-02 00:30:00');
+        $rema = Grocer::factory()->create([
+            'slug' => 'rema1000',
+        ]);
+        Grocer::factory()->create([
+            'slug' => 'netto',
+        ]);
+        Grocer::factory()->create([
+            'slug' => 'disabled',
+            'is_enabled' => false,
+        ]);
+        ScrapeJob::factory()->for($rema)->create([
+            'status' => ScrapeJobStatus::Pending,
+            'scrape_date' => '2026-06-02',
+            'scheduled_for' => now(),
+        ]);
 
         $this->artisan('scraper:schedule')
             ->expectsOutput('Scheduled scrape jobs: 1')
             ->assertSuccessful();
 
-        $this->assertSame(1, ScrapeJob::query()->count());
-        $this->assertTrue(ScrapeJob::query()->firstOrFail()->grocer->is($dueGrocer));
+        $this->assertSame(2, ScrapeJob::query()->count());
+        $this->assertDatabaseHas('scrape_jobs', [
+            'scrape_date' => '2026-06-02',
+        ]);
+        $this->assertTrue(ScrapeJob::query()->whereRelation('grocer', 'slug', 'netto')->exists());
+
+        $this->artisan('scraper:schedule')
+            ->expectsOutput('Scheduled scrape jobs: 0')
+            ->assertSuccessful();
+
+        $this->assertSame(2, ScrapeJob::query()->count());
+    }
+
+    public function test_scheduler_fails_expired_daily_cycles_before_scheduling_today(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-02 00:30:00');
+        $grocer = Grocer::factory()->create([
+            'slug' => 'rema1000',
+        ]);
+        $expiredJob = ScrapeJob::factory()->for($grocer)->create([
+            'status' => ScrapeJobStatus::Retrying,
+            'scrape_date' => '2026-06-01',
+            'scheduled_for' => now()->subHours(2),
+        ]);
+
+        $this->artisan('scraper:schedule')
+            ->expectsOutput('Scheduled scrape jobs: 1')
+            ->assertSuccessful();
+
+        $expiredJob->refresh();
+        $grocer->refresh();
+
+        $this->assertSame(ScrapeJobStatus::Failed, $expiredJob->status);
+        $this->assertSame(GrocerHealthStatus::Stale, $grocer->health_status);
+        $this->assertSame(2, ScrapeJob::query()->count());
+        $this->assertTrue(ScrapeJob::query()->where('scrape_date', '2026-06-02')->exists());
     }
 
     public function test_scheduler_recovers_expired_running_job_leases(): void
@@ -61,7 +99,6 @@ class ScrapeAutomationTest extends TestCase
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
         $grocer = Grocer::factory()->create([
             'slug' => 'netto',
-            'next_expected_import_at' => now()->subMinute(),
         ]);
         $job = ScrapeJob::factory()->for($grocer)->create([
             'status' => ScrapeJobStatus::Running,
@@ -117,7 +154,6 @@ class ScrapeAutomationTest extends TestCase
         $this->assertNotNull($job->payload_received_at);
         $this->assertSame(['fetched_paper_count' => 1, 'imported_paper_count' => 1, 'skipped_duplicate_count' => 0], $job->context);
         $this->assertSame(GrocerHealthStatus::Healthy, $grocer->health_status);
-        $this->assertSame('2026-06-02 02:00:00', $grocer->next_expected_import_at->format('Y-m-d H:i:s'));
         $this->assertDatabaseHas('scraper_agents', [
             'slug' => 'apartment-laptop',
         ]);
@@ -164,17 +200,16 @@ class ScrapeAutomationTest extends TestCase
         $this->assertSame(1, $job->attempt);
         $this->assertSame('2026-06-01 12:30:00', $job->scheduled_for->format('Y-m-d H:i:s'));
         $this->assertSame(GrocerHealthStatus::Failing, $grocer->health_status);
-        $this->assertSame('2026-06-01 12:30:00', $grocer->next_expected_import_at->format('Y-m-d H:i:s'));
     }
 
-    public function test_worker_marks_final_failure_as_failed_and_stale(): void
+    public function test_worker_marks_failure_as_failed_and_stale_when_retry_would_cross_midnight(): void
     {
-        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        CarbonImmutable::setTestNow('2026-06-01 21:30:00');
         $grocer = Grocer::factory()->create(['slug' => 'foetex']);
         $job = ScrapeJob::factory()->for($grocer)->create([
             'status' => ScrapeJobStatus::Retrying,
-            'attempt' => 2,
-            'max_attempts' => 3,
+            'attempt' => 5,
+            'scrape_date' => '2026-06-01',
             'scheduled_for' => now()->subMinute(),
         ]);
 
@@ -188,9 +223,8 @@ class ScrapeAutomationTest extends TestCase
         $grocer->refresh();
 
         $this->assertSame(ScrapeJobStatus::Failed, $job->status);
-        $this->assertSame(3, $job->attempt);
+        $this->assertSame(6, $job->attempt);
         $this->assertSame(GrocerHealthStatus::Stale, $grocer->health_status);
-        $this->assertSame('2026-06-02 02:00:00', $grocer->next_expected_import_at->format('Y-m-d H:i:s'));
     }
 
     public function test_worker_has_no_work_when_no_jobs_are_due(): void

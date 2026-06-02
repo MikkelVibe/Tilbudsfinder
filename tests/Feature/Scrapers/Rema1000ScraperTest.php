@@ -41,7 +41,8 @@ class Rema1000ScraperTest extends TestCase
             'api.digital.rema1000.dk/api/v3/products/999999?*' => Http::response(['data' => $this->productDetail(999999, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
         ]);
 
-        $payloads = (new Rema1000Scraper(sleepBetweenDetailRequests: false))->fetchPapers();
+        $scraper = new Rema1000Scraper(sleepBetweenDetailRequests: false);
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
 
         $this->assertCount(2, $payloads);
         $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
@@ -51,10 +52,10 @@ class Rema1000ScraperTest extends TestCase
         $insertPayload = json_decode($payloads[1]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
 
         $this->assertSame('algolia_product_details_grouped_by_tjek_overlap', $weeklyPayload['catalog']['source_strategy']);
-        $this->assertSame(3, $weeklyPayload['catalog']['fetched_product_offer_count']);
+        $this->assertSame(4, $weeklyPayload['catalog']['fetched_product_offer_count']);
         $this->assertSame(1, $insertPayload['catalog']['fetched_product_offer_count']);
-        $this->assertSame('LIMPAN CATALOG', $weeklyPayload['offers'][0]['catalog_product']['name']);
-        $this->assertTrue($weeklyPayload['offers'][2]['discovery_comparison']['missing_from_algolia']);
+        $this->assertContains('LIMPAN CATALOG', array_column(array_column($weeklyPayload['offers'], 'catalog_product'), 'name'));
+        $this->assertTrue(collect($weeklyPayload['offers'])->contains(fn (array $offer): bool => $offer['discovery_comparison']['missing_from_algolia'] === true));
         $this->assertSame('TOILETPAPIR', $insertPayload['offers'][0]['algolia']['name']);
         $this->assertFalse(collect($payloads)->contains(fn ($payload): bool => $payload->sourceExternalId === 'permanent-prices'));
     }
@@ -79,7 +80,37 @@ class Rema1000ScraperTest extends TestCase
         $this->expectException(ScraperFetchException::class);
         $this->expectExceptionMessage('REMA 1000 product detail coverage was 0%, below 95%.');
 
-        (new Rema1000Scraper(sleepBetweenDetailRequests: false))->fetchPapers();
+        $scraper = new Rema1000Scraper(sleepBetweenDetailRequests: false);
+        $scraper->fetchPapers($scraper->discoverPapers());
+    }
+
+    public function test_it_skips_known_catalogs_before_fetching_product_details(): void
+    {
+        CarbonImmutable::setTestNow('2026-05-29 12:00:00');
+        Http::preventStrayRequests();
+        Http::fake([
+            'squid-api.tjek.com/v2/catalogs*' => Http::response([
+                $this->catalog('weekly-paper', 'Uge 22', '2026-05-25T22:00:00+0000', '2026-05-30T21:59:59+0000'),
+            ]),
+        ]);
+
+        $scraper = new Rema1000Scraper(sleepBetweenDetailRequests: false);
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers(), [
+            'weekly-paper' => [
+                'exists' => true,
+                'title' => 'Uge 22',
+                'active_from' => '2026-05-25T22:00:00+00:00',
+                'active_until' => '2026-05-30T21:59:59+00:00',
+            ],
+        ]);
+
+        $this->assertCount(1, $payloads);
+        $this->assertTrue($payloads[0]->alreadyFetched);
+        $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
+        $proof = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('already_fetched', $proof['status']);
+
+        Http::assertSentCount(1);
     }
 
     /**

@@ -2,13 +2,17 @@
 
 namespace App\Scrapers;
 
+use App\Enums\GrocerHealthStatus;
 use App\Enums\ScrapeJobStatus;
 use App\Models\Grocer;
 use App\Models\ScrapeJob;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 class ScrapeJobScheduler
 {
+    private const SCHEDULE_HOUR = 2;
+
     public function __construct(
         private readonly ScrapeJobWorker $worker,
     ) {}
@@ -20,27 +24,35 @@ class ScrapeJobScheduler
     {
         return DB::transaction(function (): array {
             $this->recoverExpiredLeases();
+            $this->failExpiredDailyCycles();
+
+            $now = now('Europe/Copenhagen')->toImmutable();
+
+            if ($now->hour < self::SCHEDULE_HOUR) {
+                return [];
+            }
 
             $scheduledJobs = [];
+            $scrapeDate = $now->toDateString();
+            $scheduledFor = $now->setTime(self::SCHEDULE_HOUR, 0)->utc();
 
             Grocer::query()
                 ->where('is_enabled', true)
-                ->whereNotNull('next_expected_import_at')
-                ->where('next_expected_import_at', '<=', now())
-                ->orderBy('next_expected_import_at')
+                ->orderBy('slug')
                 ->lockForUpdate()
-                ->each(function (Grocer $grocer) use (&$scheduledJobs): void {
-                    if ($this->hasOpenJob($grocer)) {
+                ->each(function (Grocer $grocer) use (&$scheduledJobs, $scrapeDate, $scheduledFor): void {
+                    if ($this->hasDailyCycle($grocer, $scrapeDate)) {
                         return;
                     }
 
                     $scheduledJobs[] = ScrapeJob::create([
                         'grocer_id' => $grocer->id,
                         'scraper_agent_id' => null,
+                        'scrape_date' => $scrapeDate,
                         'status' => ScrapeJobStatus::Pending,
                         'attempt' => 0,
                         'max_attempts' => 3,
-                        'scheduled_for' => now(),
+                        'scheduled_for' => $scheduledFor,
                     ]);
                 });
 
@@ -61,9 +73,12 @@ class ScrapeJobScheduler
             });
     }
 
-    private function hasOpenJob(Grocer $grocer): bool
+    private function failExpiredDailyCycles(): void
     {
-        return $grocer->scrapeJobs()
+        $today = now('Europe/Copenhagen')->toDateString();
+
+        ScrapeJob::query()
+            ->with('grocer')
             ->whereIn('status', [
                 ScrapeJobStatus::Pending,
                 ScrapeJobStatus::Leased,
@@ -71,6 +86,33 @@ class ScrapeJobScheduler
                 ScrapeJobStatus::Uploading,
                 ScrapeJobStatus::Retrying,
             ])
+            ->whereNotNull('scrape_date')
+            ->where('scrape_date', '<', $today)
+            ->lockForUpdate()
+            ->get()
+            ->each(function (ScrapeJob $job): void {
+                $job->update([
+                    'status' => ScrapeJobStatus::Failed,
+                    'leased_until' => null,
+                    'finished_at' => now(),
+                    'failure_reason' => 'Daily scrape cycle expired at Copenhagen midnight before a successful run.',
+                    'context' => [
+                        ...($job->context ?? []),
+                        'expired_at_copenhagen_midnight' => CarbonImmutable::now('Europe/Copenhagen')->startOfDay()->toIso8601String(),
+                    ],
+                ]);
+
+                $job->grocer->update([
+                    'health_status' => GrocerHealthStatus::Stale,
+                    'last_failure_at' => now(),
+                ]);
+            });
+    }
+
+    private function hasDailyCycle(Grocer $grocer, string $scrapeDate): bool
+    {
+        return $grocer->scrapeJobs()
+            ->whereDate('scrape_date', $scrapeDate)
             ->exists();
     }
 }

@@ -117,6 +117,31 @@ class ScraperAgentApiTest extends TestCase
         ], $agent->metadata['latest_update_status']);
     }
 
+    public function test_agent_can_check_known_paper_ids_for_a_grocer(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $token = 'secret-token';
+        $this->agent($token);
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $batch = ImportBatch::factory()->for($grocer)->create();
+        Paper::factory()->for($grocer)->for($batch, 'importBatch')->create([
+            'source_external_id' => 'weekly-paper',
+            'title' => 'Uge 23',
+            'active_from' => '2026-06-01 00:00:00',
+            'active_until' => '2026-06-07 23:59:59',
+        ]);
+
+        $this->withToken($token)
+            ->postJson('/api/scraper-agent/papers/exists', [
+                'grocer' => 'rema1000',
+                'ids' => ['weekly-paper', 'insert-paper'],
+            ])
+            ->assertOk()
+            ->assertJsonPath('ids.weekly-paper.exists', true)
+            ->assertJsonPath('ids.weekly-paper.title', 'Uge 23')
+            ->assertJsonPath('ids.insert-paper.exists', false);
+    }
+
     public function test_agent_can_upload_raw_payloads_for_synchronous_ingest(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
@@ -150,6 +175,36 @@ class ScraperAgentApiTest extends TestCase
         $this->assertSame(GrocerHealthStatus::Healthy, $grocer->health_status);
         $this->assertSame(1, ImportBatch::query()->count());
         $this->assertSame(1, Paper::query()->count());
+    }
+
+    public function test_agent_can_upload_already_fetched_proof_without_importing(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $token = 'secret-token';
+        $agent = $this->agent($token);
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $job = ScrapeJob::factory()->for($grocer)->for($agent, 'scraperAgent')->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'scheduled_for' => now()->subMinute(),
+        ]);
+
+        $this->withToken($token)
+            ->postJson("/api/scraper-agent/jobs/{$job->id}/raw-payloads", [
+                'payloads' => [[
+                    'source_external_id' => 'weekly-paper',
+                    'title' => 'Uge 23',
+                    'raw_payload' => json_encode(['status' => 'already_fetched'], JSON_THROW_ON_ERROR),
+                    'already_fetched' => true,
+                ]],
+            ])
+            ->assertOk()
+            ->assertJsonPath('status', 'no_changes')
+            ->assertJsonPath('imported_paper_count', 0)
+            ->assertJsonPath('skipped_duplicate_count', 1);
+
+        $this->assertSame(0, ImportBatch::query()->count());
+        $this->assertSame(ScrapeJobStatus::NoChanges, $job->refresh()->status);
     }
 
     public function test_agent_can_report_claimed_job_failure(): void
@@ -199,6 +254,11 @@ class ScraperAgentApiTest extends TestCase
             'squid-api.tjek.com/v2/catalogs*' => Http::response([
                 $this->nettoCatalog('weekly-paper', 'Uge 23', 12),
             ]),
+            '*tilbud.test/api/scraper-agent/papers/exists' => Http::response([
+                'ids' => [
+                    'weekly-paper' => ['exists' => false],
+                ],
+            ]),
             'squid-api.tjek.com/v2/offers?catalog_id=weekly-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->nettoOffer($number), range(1, 12))),
             '*tilbud.test/api/scraper-agent/jobs/job-123/raw-payloads' => Http::response([
                 'status' => 'succeeded',
@@ -210,11 +270,14 @@ class ScraperAgentApiTest extends TestCase
         $this->artisan('scraper-agent:work --server=https://tilbud.test --token=secret --app-version=sha-123')
             ->assertSuccessful();
 
-        Http::assertSentCount(6);
+        Http::assertSentCount(7);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/version');
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/heartbeat'
             && $request['app_version'] === 'sha-123');
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/jobs/claim');
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/papers/exists'
+            && $request['grocer'] === 'netto'
+            && $request['ids'] === ['weekly-paper']);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/jobs/job-123/raw-payloads'
             && count($request['payloads']) === 1
             && $request['payloads'][0]['source_external_id'] === 'weekly-paper');

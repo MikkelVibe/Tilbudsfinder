@@ -20,6 +20,7 @@ use App\Normalization\DTO\ParsedOfferInput;
 use App\Normalization\Enums\NormalizationIssueCode;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -78,6 +79,20 @@ class ImportPersistencePipelineTest extends TestCase
         } catch (DuplicatePaperImportException) {
             $this->assertSame(1, ImportBatch::query()->count());
         }
+    }
+
+    public function test_it_does_not_fail_successful_import_when_matching_dispatch_fails(): void
+    {
+        Storage::fake('local');
+        Queue::shouldReceive('connection')->andThrow(new \RuntimeException('Queue backend unavailable.'));
+
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $paperInput = $this->paperInput($this->validOffers(10), sourceExternalId: 'paper-with-queue-failure');
+
+        $batch = (new ImportPersistencePipeline)->persist($grocer, $paperInput);
+
+        $this->assertSame(ImportBatchStatus::Succeeded, $batch->status);
+        $this->assertSame(1, Paper::query()->where('source_external_id', 'paper-with-queue-failure')->count());
     }
 
     public function test_it_fails_before_batch_when_parsed_offer_count_is_below_minimum(): void

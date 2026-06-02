@@ -3,9 +3,11 @@
 namespace App\Scrapers\Netto;
 
 use App\Imports\DTO\ParsedPaperInput;
+use App\Scrapers\DTO\PaperCandidate;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
+use App\Scrapers\Support\KnownPaperPayload;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
@@ -33,7 +35,7 @@ class NettoScraper implements GrocerScraper
     /**
      * @return list<RawPaperPayload>
      */
-    public function fetchPapers(?int $limit = null, ?callable $progress = null): array
+    public function discoverPapers(?callable $progress = null): array
     {
         $this->progress($progress, 'Fetching Netto Tjek catalogs...');
         $catalogs = $this->fetchActiveCatalogs();
@@ -46,15 +48,31 @@ class NettoScraper implements GrocerScraper
             throw new ScraperFetchException('Netto found no active Uge catalogs.');
         }
 
-        return array_map(function (array $catalog) use ($limit, $progress): RawPaperPayload {
-            $catalogId = $this->requiredString($catalog, 'id');
+        return array_map(fn (array $catalog): PaperCandidate => $this->candidate($catalog), $weeklyCatalogs);
+    }
 
-            $this->progress($progress, "Fetching Netto offers for catalog {$catalogId}...");
-            $offers = $this->fetchCatalogOffers($catalogId, $limit);
-            $this->progress($progress, 'Fetched '.count($offers)." Netto offers for catalog {$catalogId}.".($limit ? ' after limit' : ''));
+    /**
+     * @param  list<PaperCandidate>  $candidates
+     * @param  array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>  $knownPapers
+     * @return list<RawPaperPayload>
+     */
+    public function fetchPapers(array $candidates, array $knownPapers = [], ?int $limit = null, ?callable $progress = null): array
+    {
+        return array_map(function (PaperCandidate $candidate) use ($knownPapers, $limit, $progress): RawPaperPayload {
+            $knownPaper = $knownPapers[$candidate->sourceExternalId] ?? null;
 
-            return $this->rawPayload($catalog, $offers);
-        }, $weeklyCatalogs);
+            if (($knownPaper['exists'] ?? false) === true) {
+                $this->progress($progress, "Skipping already imported Netto catalog {$candidate->sourceExternalId}.");
+
+                return KnownPaperPayload::make($this->grocerKey(), $candidate, $knownPaper);
+            }
+
+            $this->progress($progress, "Fetching Netto offers for catalog {$candidate->sourceExternalId}...");
+            $offers = $this->fetchCatalogOffers($candidate->sourceExternalId, $limit);
+            $this->progress($progress, 'Fetched '.count($offers)." Netto offers for catalog {$candidate->sourceExternalId}.".($limit ? ' after limit' : ''));
+
+            return $this->rawPayload($candidate->sourcePayload, $offers);
+        }, $candidates);
     }
 
     public function parse(RawPaperPayload $payload): ParsedPaperInput
@@ -159,6 +177,18 @@ class NettoScraper implements GrocerScraper
             sourceExternalId: $catalogId,
             rawPayload: $rawPayload,
             title: $this->optionalString($catalog, 'label'),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $catalog
+     */
+    private function candidate(array $catalog): PaperCandidate
+    {
+        return new PaperCandidate(
+            sourceExternalId: $this->requiredString($catalog, 'id'),
+            title: $this->optionalString($catalog, 'label'),
+            sourcePayload: $catalog,
         );
     }
 

@@ -24,6 +24,7 @@ use App\Normalization\OfferNormalizer;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -120,7 +121,7 @@ class ImportPersistencePipeline
                 throw new ImportPipelineException($batch->failure_reason ?? 'Import failed.');
             }
 
-            MatchImportBatchProducts::dispatch($batch)->afterCommit()->onQueue('matching');
+            $this->dispatchProductMatching($batch);
 
             return $batch;
         } catch (DuplicatePaperImportException $exception) {
@@ -142,6 +143,19 @@ class ImportPersistencePipeline
             }
 
             throw new ImportPipelineException($exception->getMessage(), previous: $exception);
+        }
+    }
+
+    private function dispatchProductMatching(ImportBatch $batch): void
+    {
+        try {
+            MatchImportBatchProducts::dispatch($batch)->afterCommit()->onQueue('matching');
+        } catch (Throwable $exception) {
+            Log::warning('Product matching dispatch failed after successful import.', [
+                'import_batch_id' => $batch->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
         }
     }
 

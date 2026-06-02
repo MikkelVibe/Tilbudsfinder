@@ -60,15 +60,19 @@ class WorkRemoteScraperAgentCommand extends Command
 
         try {
             $scraper = $scraperRunService->scraperFor($grocerKey, ! (bool) $this->option('no-delay'));
-            $payloads = $scraper->fetchPapers($limit > 0 ? $limit : null, function (string $message): void {
+            $progress = function (string $message): void {
                 $this->line($message);
-            });
+            };
+            $candidates = $scraper->discoverPapers($progress);
+            $knownPapers = $this->knownPapers($client, $server, $grocerKey, array_map(fn ($candidate): string => $candidate->sourceExternalId, $candidates));
+            $payloads = $scraper->fetchPapers($candidates, $knownPapers, $limit > 0 ? $limit : null, $progress);
 
             $response = $client->post($server."/api/scraper-agent/jobs/{$jobId}/raw-payloads", [
                 'payloads' => array_map(fn ($payload): array => [
                     'source_external_id' => $payload->sourceExternalId,
                     'title' => $payload->title,
                     'raw_payload' => $payload->rawPayload,
+                    'already_fetched' => $payload->alreadyFetched,
                 ], $payloads),
             ])->throw()->json();
         } catch (Throwable $exception) {
@@ -89,5 +93,25 @@ class WorkRemoteScraperAgentCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  list<string>  $sourceExternalIds
+     * @return array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>
+     */
+    private function knownPapers($client, string $server, string $grocerKey, array $sourceExternalIds): array
+    {
+        try {
+            $response = $client->post($server.'/api/scraper-agent/papers/exists', [
+                'grocer' => $grocerKey,
+                'ids' => $sourceExternalIds,
+            ])->throw()->json('ids');
+
+            return is_array($response) ? $response : [];
+        } catch (Throwable $exception) {
+            $this->warn('Known paper check failed; continuing with full fetch: '.$exception->getMessage());
+
+            return [];
+        }
     }
 }

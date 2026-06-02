@@ -9,6 +9,7 @@ use App\Imports\ImportPersistencePipeline;
 use App\Models\ScrapeJob;
 use App\Models\ScraperAgent;
 use App\Scrapers\DTO\RawPaperPayload;
+use App\Scrapers\PaperExistenceChecker;
 use App\Scrapers\ScrapeJobWorker;
 use App\Scrapers\ScraperRunService;
 use Illuminate\Http\JsonResponse;
@@ -69,6 +70,19 @@ class ScraperAgentController extends Controller
         ]);
     }
 
+    public function knownPapers(Request $request, PaperExistenceChecker $paperExistenceChecker): JsonResponse
+    {
+        $validated = $request->validate([
+            'grocer' => ['required', 'string', 'max:255'],
+            'ids' => ['required', 'array', 'max:100'],
+            'ids.*' => ['required', 'string', 'max:255'],
+        ]);
+
+        return response()->json([
+            'ids' => $paperExistenceChecker->check($validated['grocer'], $validated['ids']),
+        ]);
+    }
+
     public function claimJob(Request $request, ScrapeJobWorker $worker): JsonResponse
     {
         $agent = $this->agent($request);
@@ -108,6 +122,7 @@ class ScraperAgentController extends Controller
             'payloads.*.source_external_id' => ['required', 'string', 'max:255'],
             'payloads.*.title' => ['nullable', 'string', 'max:255'],
             'payloads.*.raw_payload' => ['required', 'string'],
+            'payloads.*.already_fetched' => ['sometimes', 'boolean'],
         ]);
 
         $scraper = $scraperRunService->scraperFor($scrapeJob->grocer->slug);
@@ -116,6 +131,12 @@ class ScraperAgentController extends Controller
 
         try {
             foreach ($validated['payloads'] as $payload) {
+                if (($payload['already_fetched'] ?? false) === true) {
+                    $skippedDuplicateCount++;
+
+                    continue;
+                }
+
                 try {
                     $pipeline->persist(
                         $scrapeJob->grocer,

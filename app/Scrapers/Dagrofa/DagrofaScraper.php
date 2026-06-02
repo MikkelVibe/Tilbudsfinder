@@ -3,9 +3,11 @@
 namespace App\Scrapers\Dagrofa;
 
 use App\Imports\DTO\ParsedPaperInput;
+use App\Scrapers\DTO\PaperCandidate;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
+use App\Scrapers\Support\KnownPaperPayload;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
@@ -29,8 +31,44 @@ class DagrofaScraper implements GrocerScraper
     /**
      * @return list<RawPaperPayload>
      */
-    public function fetchPapers(?int $limit = null, ?callable $progress = null): array
+    public function discoverPapers(?callable $progress = null): array
     {
+        $now = CarbonImmutable::now();
+        $sourceExternalId = $this->chain->key.'-'.$now->format('Y-m-d');
+
+        return [new PaperCandidate(
+            sourceExternalId: $sourceExternalId,
+            title: $this->chain->name.' aktuelle tilbud',
+            sourcePayload: [
+                'source_external_id' => $sourceExternalId,
+                'label' => $this->chain->name.' aktuelle tilbud '.$now->format('Y-m-d'),
+                'run_from' => $now->startOfDay()->toIso8601String(),
+                'run_till' => $now->endOfDay()->toIso8601String(),
+            ],
+        )];
+    }
+
+    /**
+     * @param  list<PaperCandidate>  $candidates
+     * @param  array<string, array{exists: bool, title?: ?string, active_from?: ?string, active_until?: ?string}>  $knownPapers
+     * @return list<RawPaperPayload>
+     */
+    public function fetchPapers(array $candidates, array $knownPapers = [], ?int $limit = null, ?callable $progress = null): array
+    {
+        $candidate = $candidates[0] ?? null;
+
+        if (! $candidate) {
+            return [];
+        }
+
+        $knownPaper = $knownPapers[$candidate->sourceExternalId] ?? null;
+
+        if (($knownPaper['exists'] ?? false) === true) {
+            $this->progress($progress, "Skipping already imported {$this->chain->name} paper {$candidate->sourceExternalId}.");
+
+            return [KnownPaperPayload::make($this->grocerKey(), $candidate, $knownPaper)];
+        }
+
         $this->progress($progress, "Fetching {$this->chain->name} Dagrofa product query...");
 
         $products = $this->fetchDiscountProducts($limit);
@@ -41,7 +79,7 @@ class DagrofaScraper implements GrocerScraper
 
         $this->progress($progress, 'Fetched '.count($products)." {$this->chain->name} discounted products".($limit ? ' after limit' : '').'.');
 
-        return [$this->rawPayload($products)];
+        return [$this->rawPayload($candidate, $products)];
     }
 
     public function parse(RawPaperPayload $payload): ParsedPaperInput
@@ -89,16 +127,14 @@ class DagrofaScraper implements GrocerScraper
     /**
      * @param  list<array<string, mixed>>  $products
      */
-    private function rawPayload(array $products): RawPaperPayload
+    private function rawPayload(PaperCandidate $candidate, array $products): RawPaperPayload
     {
-        $now = CarbonImmutable::now();
-        $sourceExternalId = $this->chain->key.'-'.$now->format('Y-m-d');
         $rawPayload = $this->encode([
             'catalog' => [
-                'id' => $sourceExternalId,
-                'label' => $this->chain->name.' aktuelle tilbud '.$now->format('Y-m-d'),
-                'run_from' => $now->startOfDay()->toIso8601String(),
-                'run_till' => $now->endOfDay()->toIso8601String(),
+                'id' => $candidate->sourceExternalId,
+                'label' => $candidate->sourcePayload['label'],
+                'run_from' => $candidate->sourcePayload['run_from'],
+                'run_till' => $candidate->sourcePayload['run_till'],
                 'dealer_id' => (string) $this->chain->merchantId,
                 'dealer' => ['name' => $this->chain->name],
                 'source_url' => $this->chain->sourceUrl,
@@ -109,9 +145,9 @@ class DagrofaScraper implements GrocerScraper
         ]);
 
         return new RawPaperPayload(
-            sourceExternalId: $sourceExternalId,
+            sourceExternalId: $candidate->sourceExternalId,
             rawPayload: $rawPayload,
-            title: $this->chain->name.' aktuelle tilbud',
+            title: $candidate->title,
         );
     }
 
