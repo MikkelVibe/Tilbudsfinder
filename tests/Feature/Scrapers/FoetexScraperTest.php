@@ -28,7 +28,8 @@ class FoetexScraperTest extends TestCase
             ]),
         ]);
 
-        $payloads = (new FoetexScraper)->fetchPapers();
+        $scraper = new FoetexScraper;
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
 
         $this->assertCount(1, $payloads);
         $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
@@ -58,7 +59,7 @@ class FoetexScraperTest extends TestCase
         $this->expectException(ScraperFetchException::class);
         $this->expectExceptionMessage('føtex found no active Uge catalogs.');
 
-        (new FoetexScraper)->fetchPapers();
+        (new FoetexScraper)->discoverPapers();
     }
 
     /**

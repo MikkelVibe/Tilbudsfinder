@@ -25,7 +25,8 @@ class CoopTjekScraperTest extends TestCase
             'squid-api.tjek.com/v4/rpc/generate_incito_from_publication*' => Http::response($this->incitoPayload()),
         ]);
 
-        $payloads = (new CoopTjekScraper(CoopBanner::kvickly()))->fetchPapers();
+        $scraper = new CoopTjekScraper(CoopBanner::kvickly());
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
 
         $this->assertCount(1, $payloads);
         $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
@@ -65,7 +66,7 @@ class CoopTjekScraperTest extends TestCase
         $this->expectException(ScraperFetchException::class);
         $this->expectExceptionMessage('SuperBrugsen found no active Uge catalogs.');
 
-        (new CoopTjekScraper(CoopBanner::superbrugsen()))->fetchPapers();
+        (new CoopTjekScraper(CoopBanner::superbrugsen()))->discoverPapers();
     }
 
     /**

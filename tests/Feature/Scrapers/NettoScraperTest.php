@@ -23,7 +23,8 @@ class NettoScraperTest extends TestCase
             'squid-api.tjek.com/v2/offers?catalog_id=weekly-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->offer($number), range(1, 12))),
         ]);
 
-        $payloads = (new NettoScraper)->fetchPapers();
+        $scraper = new NettoScraper;
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
 
         $this->assertCount(1, $payloads);
         $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
@@ -50,7 +51,7 @@ class NettoScraperTest extends TestCase
         $this->expectException(ScraperFetchException::class);
         $this->expectExceptionMessage('Netto found no active Uge catalogs.');
 
-        (new NettoScraper)->fetchPapers();
+        (new NettoScraper)->discoverPapers();
     }
 
     /**

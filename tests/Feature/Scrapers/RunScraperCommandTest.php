@@ -210,6 +210,11 @@ class RunScraperCommandTest extends TestCase
                 $this->foetexCatalog('summer-beauty', 'Sommerskøn', 12),
             ]),
             'squid-api.tjek.com/v2/offers?catalog_id=weekly-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->foetexOffer($number), range(1, 12))),
+            'drp4o45g5t-dsn.algolia.net/1/indexes/prod_FOETEX_PRODUCTS/query' => Http::response([
+                'nbHits' => 0,
+                'nbPages' => 0,
+                'hits' => [],
+            ]),
         ]);
     }
 
@@ -220,7 +225,11 @@ class RunScraperCommandTest extends TestCase
                 $this->bilkaCatalog('nonfood-paper', 'Bilka Nonfood Uge 23 2026 - Elektronik, Bolig, Have & Tekstil', 12),
                 $this->bilkaCatalog('food-paper', 'Bilka Food Uge 23 2026 - Fødevarer & Personlig Pleje', 12),
             ]),
-            'squid-api.tjek.com/v2/offers?catalog_id=food-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->bilkaOffer($number), range(1, 12))),
+            'f9vbjlr1bk-dsn.algolia.net/1/indexes/prod_BILKATOGO_PRODUCTS/query' => Http::response([
+                'nbHits' => 12,
+                'nbPages' => 1,
+                'hits' => array_map(fn (int $number): array => $this->bilkaOffer($number), range(1, 12)),
+            ]),
         ]);
     }
 
@@ -404,18 +413,32 @@ class RunScraperCommandTest extends TestCase
     private function bilkaOffer(int $number): array
     {
         return [
-            'id' => "bilka-offer-{$number}",
-            'heading' => "Bilka Product {$number}",
-            'description' => '200 g. Pr. kg 50,00.',
-            'catalog_page' => $number,
-            'pricing' => ['price' => 10, 'currency' => 'DKK'],
-            'quantity' => [
-                'unit' => ['symbol' => 'g'],
-                'size' => ['from' => 200, 'to' => 200],
-                'pieces' => ['from' => 1, 'to' => 1],
+            'objectID' => "bilka-product-{$number}",
+            'name' => "Bilka Product {$number}",
+            'brand' => 'Salling',
+            'description' => 'Salling product description',
+            'netcontent' => '200 g',
+            'units' => 200,
+            'unitsOfMeasure' => 'g',
+            'storeData' => [
+                '1653' => [
+                    'price' => 1000,
+                    'unitsOfMeasureOfferPrice' => 5000,
+                    'unitsOfMeasurePriceUnit' => 'Kg.',
+                    'offerDescription' => 'Skarp pris',
+                    'offerMax' => 0,
+                ],
             ],
-            'images' => ['zoom' => "https://images.example/bilka/{$number}.webp"],
-            'catalog_id' => 'food-paper',
+            'consumerFacingHierarchy' => [
+                'lvl0' => ['Frugt & grønt'],
+            ],
+            'infos' => [
+                [
+                    'items' => [
+                        ['title' => 'EAN', 'value' => '570000000000'.$number],
+                    ],
+                ],
+            ],
         ];
     }
 

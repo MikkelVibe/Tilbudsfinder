@@ -21,10 +21,11 @@ class NemligScraperTest extends TestCase
             'www.nemlig.com/webapi/AAAAAAAA/2026060208-60-600/1/0/Products/Get?id=*' => Http::response($this->productDetail()),
         ]);
 
-        $payloads = (new NemligScraper)->fetchPapers(limit: 5);
+        $scraper = new NemligScraper;
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers(), limit: 5);
 
         $this->assertCount(1, $payloads);
-        $this->assertSame('nemlig-2026-05-31-2026-06-07', $payloads[0]->sourceExternalId);
+        $this->assertSame('nemlig-AAAAAAAA-oLJ90N-_-2026060208-60-600', $payloads[0]->sourceExternalId);
 
         $payload = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
 
@@ -54,7 +55,7 @@ class NemligScraperTest extends TestCase
         $this->expectException(ScraperFetchException::class);
         $this->expectExceptionMessage('Nemlig offers page returned no product groups.');
 
-        (new NemligScraper)->fetchPapers();
+        (new NemligScraper)->discoverPapers();
     }
 
     /**

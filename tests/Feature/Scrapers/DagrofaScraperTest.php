@@ -26,7 +26,8 @@ class DagrofaScraperTest extends TestCase
             ]),
         ]);
 
-        $payloads = (new SparScraper)->fetchPapers();
+        $scraper = new SparScraper;
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
 
         $this->assertCount(1, $payloads);
         $this->assertSame('spar-2026-05-31', $payloads[0]->sourceExternalId);

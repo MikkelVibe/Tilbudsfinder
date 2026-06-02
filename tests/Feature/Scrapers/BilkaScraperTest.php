@@ -28,7 +28,8 @@ class BilkaScraperTest extends TestCase
             ]),
         ]);
 
-        $payloads = (new BilkaScraper)->fetchPapers();
+        $scraper = new BilkaScraper;
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
 
         $this->assertCount(1, $payloads);
         $this->assertSame('food-paper', $payloads[0]->sourceExternalId);
@@ -65,7 +66,7 @@ class BilkaScraperTest extends TestCase
         $this->expectException(ScraperFetchException::class);
         $this->expectExceptionMessage('Bilka found no active Food Uge catalogs.');
 
-        (new BilkaScraper)->fetchPapers();
+        (new BilkaScraper)->discoverPapers();
     }
 
     /**
