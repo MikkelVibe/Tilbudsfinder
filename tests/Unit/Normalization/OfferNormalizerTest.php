@@ -109,7 +109,7 @@ class OfferNormalizerTest extends TestCase
         $this->assertFalse($invalidPrice->isPublishable());
     }
 
-    public function test_it_warns_and_removes_unit_price_when_source_and_calculated_unit_prices_disagree(): void
+    public function test_it_warns_and_uses_calculated_unit_price_when_source_and_calculated_unit_prices_disagree(): void
     {
         $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
             title: 'Smør',
@@ -118,12 +118,28 @@ class OfferNormalizerTest extends TestCase
             sourceUnitPrice: '19,95',
         ));
 
-        $this->assertSame(NormalizedOfferStatus::Partial, $offer->status);
-        $this->assertNull($offer->unitPrice);
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $offer->status);
+        $this->assertSame('29.90', $offer->unitPrice?->decimal());
         $this->assertSame('29.90', $offer->calculatedUnitPrice?->decimal());
         $this->assertSame('19.95', $offer->sourceUnitPrice?->decimal());
         $this->assertSame(NormalizationIssueCode::UnitPriceMismatch, $offer->issues[0]->code);
         $this->assertSame(49, $offer->confidence);
+    }
+
+    public function test_it_allows_small_percentage_unit_price_differences_from_source_rounding(): void
+    {
+        $offer = (new OfferNormalizer)->normalize(new ParsedOfferInput(
+            title: 'Estragon',
+            price: '20.21',
+            packageText: '9 g',
+            sourceUnitPrice: '2245.78',
+        ));
+
+        $this->assertSame(NormalizedOfferStatus::Succeeded, $offer->status);
+        $this->assertSame('2245.56', $offer->calculatedUnitPrice?->decimal());
+        $this->assertSame('2245.78', $offer->sourceUnitPrice?->decimal());
+        $this->assertSame('2245.56', $offer->unitPrice?->decimal());
+        $this->assertSame([], $offer->issues);
     }
 
     public function test_it_uses_smallest_package_amount_for_ranges(): void

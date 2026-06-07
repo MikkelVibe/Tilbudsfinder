@@ -21,6 +21,7 @@ use App\Normalization\DTO\NormalizationIssue;
 use App\Normalization\DTO\NormalizedOffer;
 use App\Normalization\Enums\NormalizedOfferStatus;
 use App\Normalization\OfferNormalizer;
+use App\Search\OfferSearchDocumentBuilder;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +37,7 @@ class ImportPersistencePipeline
 
     public function __construct(
         private readonly OfferNormalizer $offerNormalizer = new OfferNormalizer,
+        private readonly OfferSearchDocumentBuilder $searchDocumentBuilder = new OfferSearchDocumentBuilder,
     ) {}
 
     public function persist(Grocer $grocer, ParsedPaperInput $paperInput, ?ScrapeJob $scrapeJob = null): ImportBatch
@@ -121,6 +123,7 @@ class ImportPersistencePipeline
                 throw new ImportPipelineException($batch->failure_reason ?? 'Import failed.');
             }
 
+            $this->rebuildSearchDocuments($batch);
             $this->dispatchProductMatching($batch);
 
             return $batch;
@@ -152,6 +155,19 @@ class ImportPersistencePipeline
             MatchImportBatchProducts::dispatch($batch)->afterCommit()->onQueue('matching');
         } catch (Throwable $exception) {
             Log::warning('Product matching dispatch failed after successful import.', [
+                'import_batch_id' => $batch->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function rebuildSearchDocuments(ImportBatch $batch): void
+    {
+        try {
+            $this->searchDocumentBuilder->rebuildForImportBatch($batch);
+        } catch (Throwable $exception) {
+            Log::warning('Search document rebuild failed after successful import.', [
                 'import_batch_id' => $batch->id,
                 'exception' => $exception::class,
                 'message' => $exception->getMessage(),

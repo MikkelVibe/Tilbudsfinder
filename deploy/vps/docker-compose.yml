@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    command: php artisan queue:work --sleep=3 --tries=3 --timeout=120
+    command: php artisan queue:work --queue=matching,default --sleep=3 --tries=3 --timeout=120
     depends_on:
       - postgres
       - redis

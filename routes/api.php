@@ -1,7 +1,12 @@
 <?php
 
 use App\Http\Controllers\Api\ScraperAgentController;
+use App\Http\Controllers\Api\V1\OfferSearchController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
+    Route::get('offers/search', OfferSearchController::class);
+});
 
 Route::prefix('scraper-agent')
     ->middleware('scraper-agent')

@@ -13,15 +13,19 @@ use App\Imports\ImportPersistencePipeline;
 use App\Models\Grocer;
 use App\Models\ImportBatch;
 use App\Models\NormalizationFailure;
+use App\Models\OfferSearchDocument;
 use App\Models\Paper;
 use App\Models\ScrapedOffer;
 use App\Models\ScrapeJob;
 use App\Normalization\DTO\ParsedOfferInput;
 use App\Normalization\Enums\NormalizationIssueCode;
+use App\Search\OfferSearchDocumentBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
 use Tests\TestCase;
 
 class ImportPersistencePipelineTest extends TestCase
@@ -53,6 +57,7 @@ class ImportPersistencePipelineTest extends TestCase
 
         $this->assertSame(1, Paper::query()->where('import_batch_id', $batch->id)->count());
         $this->assertSame(11, ScrapedOffer::query()->where('import_batch_id', $batch->id)->count());
+        $this->assertSame(11, OfferSearchDocument::query()->where('grocer_slug', 'rema1000')->count());
         $this->assertSame(2, NormalizationFailure::query()->where('import_batch_id', $batch->id)->count());
         $this->assertSame(1, NormalizationFailure::query()->whereNull('scraped_offer_id')->count());
 
@@ -93,6 +98,32 @@ class ImportPersistencePipelineTest extends TestCase
 
         $this->assertSame(ImportBatchStatus::Succeeded, $batch->status);
         $this->assertSame(1, Paper::query()->where('source_external_id', 'paper-with-queue-failure')->count());
+    }
+
+    public function test_it_does_not_fail_successful_import_when_search_document_rebuild_fails(): void
+    {
+        Storage::fake('local');
+        Log::shouldReceive('warning')
+            ->with('Search document rebuild failed after successful import.', Mockery::type('array'))
+            ->once();
+        Log::shouldReceive('warning')->zeroOrMoreTimes();
+
+        $searchDocumentBuilder = Mockery::mock(OfferSearchDocumentBuilder::class);
+        $searchDocumentBuilder
+            ->shouldReceive('rebuildForImportBatch')
+            ->once()
+            ->andThrow(new \RuntimeException('Index unavailable.'));
+
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $job = ScrapeJob::factory()->for($grocer)->create(['status' => ScrapeJobStatus::Running]);
+        $paperInput = $this->paperInput($this->validOffers(10), sourceExternalId: 'paper-with-index-failure');
+
+        $batch = (new ImportPersistencePipeline(searchDocumentBuilder: $searchDocumentBuilder))->persist($grocer, $paperInput, $job);
+
+        $this->assertSame(ImportBatchStatus::Succeeded, $batch->status);
+        $this->assertSame(ScrapeJobStatus::Succeeded, $job->refresh()->status);
+        $this->assertSame(GrocerHealthStatus::Healthy, $grocer->refresh()->health_status);
+        $this->assertSame(1, Paper::query()->where('source_external_id', 'paper-with-index-failure')->count());
     }
 
     public function test_it_fails_before_batch_when_parsed_offer_count_is_below_minimum(): void

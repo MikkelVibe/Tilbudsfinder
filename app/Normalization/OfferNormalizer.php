@@ -17,7 +17,7 @@ use Brick\Math\RoundingMode;
 
 class OfferNormalizer
 {
-    private const UNIT_PRICE_MISMATCH_TOLERANCE = '0.05';
+    private const UNIT_PRICE_MISMATCH_PERCENT_TOLERANCE = '1.00';
 
     public function __construct(
         private readonly PriceParser $priceParser = new PriceParser,
@@ -61,16 +61,16 @@ class OfferNormalizer
         if ($sourceUnitPrice && $calculatedUnitPrice && $this->unitPricesMismatch($sourceUnitPrice, $calculatedUnitPrice)) {
             $issues[] = new NormalizationIssue(
                 NormalizationIssueCode::UnitPriceMismatch,
-                'Source unit price and calculated unit price differ beyond tolerance.',
+                'Source unit price and calculated unit price differ beyond tolerance; calculated unit price was used.',
                 NormalizationFailureSeverity::Warning,
                 'unit_price',
                 [
                     'source_unit_price' => $sourceUnitPrice->decimal(),
                     'calculated_unit_price' => $calculatedUnitPrice->decimal(),
-                    'tolerance' => self::UNIT_PRICE_MISMATCH_TOLERANCE,
+                    'tolerance_percent' => self::UNIT_PRICE_MISMATCH_PERCENT_TOLERANCE,
                 ],
             );
-            $chosenUnitPrice = null;
+            $chosenUnitPrice = $calculatedUnitPrice;
             $confidence = min($confidence, 49);
         }
 
@@ -168,9 +168,17 @@ class OfferNormalizer
 
     private function unitPricesMismatch(Money $sourceUnitPrice, Money $calculatedUnitPrice): bool
     {
-        $difference = $sourceUnitPrice->amount->minus($calculatedUnitPrice->amount)->abs();
+        if ($calculatedUnitPrice->amount->isZero()) {
+            return false;
+        }
 
-        return $difference->isGreaterThan(BigDecimal::of(self::UNIT_PRICE_MISMATCH_TOLERANCE));
+        $differencePercent = $sourceUnitPrice->amount
+            ->minus($calculatedUnitPrice->amount)
+            ->abs()
+            ->multipliedBy('100')
+            ->dividedBy($calculatedUnitPrice->amount, 6, RoundingMode::HALF_UP);
+
+        return $differencePercent->isGreaterThan(BigDecimal::of(self::UNIT_PRICE_MISMATCH_PERCENT_TOLERANCE));
     }
 
     private function confidence(?PackageQuantity $quantity, ?Money $sourceUnitPrice, ?Money $calculatedUnitPrice): int
