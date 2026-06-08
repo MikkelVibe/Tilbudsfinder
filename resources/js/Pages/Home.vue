@@ -1,6 +1,7 @@
 <script setup>
 import { Link } from '@inertiajs/vue3';
 import { reactive } from 'vue';
+import SiteHeader from '../Components/SiteHeader.vue';
 
 defineProps({
     popularOffers: {
@@ -27,20 +28,9 @@ function markImageLoaded(key) {
 
 <template>
     <main class="min-h-screen bg-[#fbf9f4] text-[#1f2a24]">
-        <header class="border-b-4 border-[#173124] bg-[#fbf9f4]">
-            <div class="mx-auto flex max-w-7xl items-center justify-between gap-8 px-6 py-6 lg:px-8">
-                <Link href="/" class="font-serif text-4xl font-bold tracking-[-0.04em] text-[#173124] sm:text-5xl">
-                    Tilbudsfinder
-                </Link>
+        <SiteHeader />
 
-                <nav aria-label="Primær navigation" class="hidden items-center gap-8 text-xs font-extrabold uppercase tracking-[0.22em] text-[#173124] md:flex">
-                    <a href="#search" class="transition hover:text-[#b3261e]">Søg tilbud</a>
-                    <a href="#stores" class="transition hover:text-[#b3261e]">Butikker</a>
-                </nav>
-            </div>
-        </header>
-
-        <div class="mx-auto grid max-w-7xl gap-8 px-6 py-8 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] lg:px-8 lg:py-12">
+        <div class="mx-auto grid max-w-[1200px] gap-8 px-6 py-8 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] lg:py-12">
             <section class="min-w-0">
                 <div id="search" class="border-t-2 border-b border-[#111111] py-4">
                     <div class="flex items-center gap-4 border-b border-[#111111] pb-3 text-xs font-extrabold uppercase tracking-[0.24em] text-[#173124]">
@@ -95,10 +85,12 @@ function markImageLoaded(key) {
                     </div>
 
                     <div v-if="popularOffers.length" class="grid gap-4 md:grid-cols-3">
-                        <article
+                        <Link
                             v-for="offer in popularOffers"
                             :key="offer.id"
-                            class="border border-[#c9c1b4] bg-white"
+                            :href="`/tilbud/${offer.id}`"
+                            prefetch
+                            class="block border border-[#c9c1b4] bg-white transition hover:border-[#173124] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#173124]"
                         >
                             <div :class="['relative m-4 grid h-[220px] place-items-center overflow-hidden border border-[#d8d0c3]', offer.color]">
                                 <template v-if="offer.imageUrl">
@@ -139,7 +131,7 @@ function markImageLoaded(key) {
                                     <span class="whitespace-nowrap text-right leading-5">{{ offer.unitPrice || 'UKENDT/STK' }}</span>
                                 </div>
                             </div>
-                        </article>
+                        </Link>
                     </div>
 
                     <div v-else class="border border-[#c9c1b4] bg-white p-6 text-sm font-semibold text-[#6f746d]">
@@ -154,7 +146,7 @@ function markImageLoaded(key) {
                     </div>
 
                     <div v-if="latestOffers.length" class="divide-y divide-[#c9c1b4] border-y border-[#c9c1b4]">
-                        <article v-for="offer in latestOffers" :key="offer.id" class="grid grid-cols-[72px_1fr_auto] gap-4 py-4">
+                        <Link v-for="offer in latestOffers" :key="offer.id" :href="`/tilbud/${offer.id}`" prefetch class="grid grid-cols-[72px_1fr_auto] gap-4 border border-transparent px-3 py-4 transition hover:border-[#173124] hover:bg-white hover:text-[#b3261e] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#173124]">
                             <div :class="['relative grid size-[72px] place-items-center overflow-hidden border border-[#d8d0c3]', offer.color]">
                                 <template v-if="offer.imageUrl">
                                     <div
@@ -166,7 +158,7 @@ function markImageLoaded(key) {
                                         :src="offer.imageUrl"
                                         :alt="offer.title"
                                         :class="[
-                                            'absolute left-1/2 top-1/2 max-h-[56px] max-w-[56px] -translate-x-1/2 -translate-y-1/2 object-contain transition-opacity duration-200',
+                                            'h-full w-full object-contain object-center transition-opacity duration-200',
                                             loadedImages[`latest-${offer.id}`] ? 'opacity-100' : 'opacity-0',
                                         ]"
                                         loading="lazy"
@@ -181,7 +173,7 @@ function markImageLoaded(key) {
                                 <p class="mt-1 text-sm font-semibold text-[#6f746d]">{{ offer.meta }}</p>
                             </div>
                             <p class="self-center text-3xl font-extrabold tracking-[-0.05em] text-[#b3261e]">{{ offer.price }}</p>
-                        </article>
+                        </Link>
                     </div>
 
                     <div v-else class="border-y border-[#c9c1b4] py-5 text-sm font-semibold text-[#6f746d]">

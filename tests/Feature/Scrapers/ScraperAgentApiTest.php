@@ -237,6 +237,8 @@ class ScraperAgentApiTest extends TestCase
 
     public function test_agent_command_claims_fetches_and_uploads_remote_job(): void
     {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+
         Http::fake([
             '*tilbud.test/api/scraper-agent/version' => Http::response([
                 'desired_version' => 'sha-123',
