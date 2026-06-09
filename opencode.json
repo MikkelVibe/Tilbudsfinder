@@ -3,6 +3,20 @@
     "plugin": [
         "ecc-universal"
     ],
+    "agent": {
+        "code-reviewer": {
+            "description": "Expert code review specialist. Reviews code for quality, security, and maintainability. Use immediately after writing or modifying code.",
+            "mode": "subagent",
+            "prompt": "{file:.opencode/prompts/agents/code-reviewer.txt}",
+            "permission": {
+                "read": "allow",
+                "glob": "allow",
+                "grep": "allow",
+                "bash": "ask",
+                "edit": "deny"
+            }
+        }
+    },
     "mcp": {
         "laravel-boost": {
             "type": "local",
