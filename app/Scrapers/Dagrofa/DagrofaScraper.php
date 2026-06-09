@@ -9,7 +9,9 @@ use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
 use App\Scrapers\Support\KnownPaperPayload;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use JsonException;
@@ -34,16 +36,24 @@ class DagrofaScraper implements GrocerScraper
     public function discoverPapers(?callable $progress = null): array
     {
         $now = CarbonImmutable::now();
-        $sourceExternalId = $this->chain->key.'-'.$now->format('Y-m-d');
+        $metadata = $this->fetchIpaperMetadata();
+        $hasStablePaperMetadata = isset($metadata['paper_uuid'], $metadata['active_from'], $metadata['active_until']);
+        $sourceExternalId = $hasStablePaperMetadata ? $metadata['paper_uuid'] : $this->chain->key.'-'.$now->format('Y-m-d');
+        $title = $metadata['title'] ?? $this->chain->name.' aktuelle tilbud';
+        $sourceUrl = $metadata['source_url'] ?? $this->chain->sourceUrl;
+        $activeFrom = $metadata['active_from'] ?? $now->startOfDay()->toIso8601String();
+        $activeUntil = $metadata['active_until'] ?? $now->endOfDay()->toIso8601String();
 
         return [new PaperCandidate(
             sourceExternalId: $sourceExternalId,
-            title: $this->chain->name.' aktuelle tilbud',
+            title: $title,
             sourcePayload: [
                 'source_external_id' => $sourceExternalId,
-                'label' => $this->chain->name.' aktuelle tilbud '.$now->format('Y-m-d'),
-                'run_from' => $now->startOfDay()->toIso8601String(),
-                'run_till' => $now->endOfDay()->toIso8601String(),
+                'label' => $title,
+                'run_from' => $activeFrom,
+                'run_till' => $activeUntil,
+                'source_url' => $sourceUrl,
+                'ipaper_paper_id' => $metadata['paper_id'] ?? null,
             ],
         )];
     }
@@ -137,8 +147,9 @@ class DagrofaScraper implements GrocerScraper
                 'run_till' => $candidate->sourcePayload['run_till'],
                 'dealer_id' => (string) $this->chain->merchantId,
                 'dealer' => ['name' => $this->chain->name],
-                'source_url' => $this->chain->sourceUrl,
+                'source_url' => $candidate->sourcePayload['source_url'] ?? $this->chain->sourceUrl,
                 'source_strategy' => 'dagrofa_longjohn_discount_products',
+                'ipaper_paper_id' => $candidate->sourcePayload['ipaper_paper_id'] ?? null,
                 'fetched_offer_count' => count($products),
             ],
             'offers' => $products,
@@ -149,6 +160,111 @@ class DagrofaScraper implements GrocerScraper
             rawPayload: $rawPayload,
             title: $candidate->title,
         );
+    }
+
+    /**
+     * @return array{paper_uuid?: string, title?: string, source_url?: string, paper_id?: int, active_from?: string, active_until?: string}
+     */
+    private function fetchIpaperMetadata(): array
+    {
+        if ($this->chain->iPaperUrl === null) {
+            return [];
+        }
+
+        try {
+            $body = $this->http()
+                ->get($this->chain->iPaperUrl)
+                ->throw()
+                ->body();
+        } catch (ConnectionException|RequestException) {
+            return [];
+        }
+
+        if (preg_match('/iPaper\/Papers\/(?<uuid>[0-9a-f-]{36})\//i', $body, $matches) !== 1) {
+            return [];
+        }
+
+        $settings = $this->ipaperSettingsFragment($body, $matches['uuid']);
+        $title = $this->extractIpaperString($settings, 'name') ?? $this->extractIpaperString($settings, 'pageTitle');
+        $activePeriod = $this->activePeriodFromText($body);
+
+        return array_filter([
+            'paper_uuid' => strtolower($matches['uuid']),
+            'title' => $title,
+            'source_url' => $this->chain->iPaperUrl,
+            'paper_id' => $this->extractIpaperInt($settings, 'paperId'),
+            'active_from' => $activePeriod['active_from'] ?? null,
+            'active_until' => $activePeriod['active_until'] ?? null,
+        ], static fn (mixed $value): bool => $value !== null);
+    }
+
+    private function ipaperSettingsFragment(string $body, string $paperUuid): string
+    {
+        $position = strpos($body, $paperUuid);
+
+        if ($position === false) {
+            return $body;
+        }
+
+        return substr($body, max(0, $position - 2000), 4000);
+    }
+
+    /**
+     * @return array{active_from?: string, active_until?: string}
+     */
+    private function activePeriodFromText(string $body): array
+    {
+        if (preg_match('/g(?:æ|ae)lder.{0,300}?(?<from>\d{1,2}\.\d{1,2}\.\d{4}).{0,300}?(?<until>\d{1,2}\.\d{1,2}\.\d{4})/isu', $body, $matches) !== 1) {
+            return [];
+        }
+
+        $activeFrom = $this->parseIpaperDate($matches['from'])?->startOfDay();
+        $activeUntil = $this->parseIpaperDate($matches['until'])?->endOfDay();
+
+        if ($activeFrom === null || $activeUntil === null) {
+            return [];
+        }
+
+        if ($activeUntil->lessThan($activeFrom)) {
+            return [];
+        }
+
+        return [
+            'active_from' => $activeFrom->toIso8601String(),
+            'active_until' => $activeUntil->toIso8601String(),
+        ];
+    }
+
+    private function parseIpaperDate(string $date): ?CarbonImmutable
+    {
+        $parsed = CarbonImmutable::createFromFormat('!d.m.Y', $date);
+        $errors = CarbonImmutable::getLastErrors();
+
+        if ($parsed === false
+            || (($errors['warning_count'] ?? 0) > 0)
+            || (($errors['error_count'] ?? 0) > 0)) {
+            return null;
+        }
+
+        return $parsed;
+    }
+
+    private function extractIpaperString(string $body, string $key): ?string
+    {
+        if (preg_match('/["\']?'.preg_quote($key, '/').'["\']?\s*:\s*["\'](?<value>[^"\']+)["\']/i', $body, $matches) !== 1) {
+            return null;
+        }
+
+        return trim($matches['value']) ?: null;
+    }
+
+    private function extractIpaperInt(string $body, string $key): ?int
+    {
+        if (preg_match('/["\']?'.preg_quote($key, '/').'["\']?\s*:\s*(?<value>\d+)/i', $body, $matches) !== 1) {
+            return null;
+        }
+
+        return (int) $matches['value'];
     }
 
     private function http(): PendingRequest

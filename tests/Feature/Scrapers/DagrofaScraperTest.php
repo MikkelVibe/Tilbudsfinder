@@ -16,6 +16,7 @@ class DagrofaScraperTest extends TestCase
         CarbonImmutable::setTestNow('2026-05-31 12:00:00');
         Http::preventStrayRequests();
         Http::fake([
+            'ugensavis.spar.dk/' => Http::response('<script>window.staticSettings = { paperId: 3033533, name: "SPAR uge 2426", aws: { url: "https://b2-cdn.ipaper.io/iPaper/Papers/351b1b4c-8f34-4c02-8664-bb16f02c3da8/" } };</script><div>Avisen gælder fra 05.06.2026 til og med 11.06.2026</div>'),
             'longjohnapi.azurewebsites.net/Product/query*' => Http::response([
                 'total' => 3,
                 'products' => [
@@ -30,13 +31,32 @@ class DagrofaScraperTest extends TestCase
         $payloads = $scraper->fetchPapers($scraper->discoverPapers());
 
         $this->assertCount(1, $payloads);
-        $this->assertSame('spar-2026-05-31', $payloads[0]->sourceExternalId);
+        $this->assertSame('351b1b4c-8f34-4c02-8664-bb16f02c3da8', $payloads[0]->sourceExternalId);
 
         $payload = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
 
+        $this->assertSame('SPAR uge 2426', $payload['catalog']['label']);
+        $this->assertSame('2026-06-05T00:00:00+00:00', $payload['catalog']['run_from']);
+        $this->assertSame('2026-06-11T23:59:59+00:00', $payload['catalog']['run_till']);
+        $this->assertSame(3033533, $payload['catalog']['ipaper_paper_id']);
+        $this->assertSame('https://ugensavis.spar.dk/', $payload['catalog']['source_url']);
         $this->assertSame('dagrofa_longjohn_discount_products', $payload['catalog']['source_strategy']);
         $this->assertSame(1, $payload['catalog']['fetched_offer_count']);
         $this->assertSame('Kyllingebryst', $payload['offers'][0]['productDisplayName']);
+    }
+
+    public function test_it_falls_back_to_dated_dagrofa_id_when_ipaper_metadata_is_unavailable(): void
+    {
+        CarbonImmutable::setTestNow('2026-05-31 12:00:00');
+        Http::preventStrayRequests();
+        Http::fake([
+            'ugensavis.spar.dk/' => Http::response('<script>window.staticSettings = { name: "SPAR uge 2426", aws: { url: "https://b2-cdn.ipaper.io/iPaper/Papers/351b1b4c-8f34-4c02-8664-bb16f02c3da8/" } };</script><div>Avisen gælder fra 31.02.2026 til og med 04.03.2026</div>'),
+        ]);
+
+        $payloads = (new SparScraper)->discoverPapers();
+
+        $this->assertSame('spar-2026-05-31', $payloads[0]->sourceExternalId);
+        $this->assertSame('SPAR uge 2426', $payloads[0]->title);
     }
 
     public function test_chain_wrappers_use_expected_keys(): void

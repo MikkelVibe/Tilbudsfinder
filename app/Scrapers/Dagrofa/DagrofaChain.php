@@ -10,6 +10,7 @@ readonly class DagrofaChain
         public int $merchantId,
         public string $baseUrl,
         public string $sourceUrl,
+        public ?string $iPaperUrl = null,
     ) {}
 
     public static function meny(): self
@@ -20,6 +21,7 @@ readonly class DagrofaChain
             merchantId: 558155,
             baseUrl: 'https://longjohnapi-meny.azurewebsites.net',
             sourceUrl: 'https://meny.dk/',
+            iPaperUrl: 'https://ugensavis.meny.dk/',
         );
     }
 
@@ -31,6 +33,7 @@ readonly class DagrofaChain
             merchantId: 1222,
             baseUrl: 'https://longjohnapi.azurewebsites.net',
             sourceUrl: 'https://spar.dk/',
+            iPaperUrl: 'https://ugensavis.spar.dk/',
         );
     }
 
