@@ -89,4 +89,48 @@ class HomePageTest extends TestCase
                 ->etc()
             );
     }
+
+    public function test_homepage_stores_include_search_filter_slug(): void
+    {
+        $grocer = Grocer::factory()->create([
+            'slug' => 'spar',
+            'name' => 'SPAR',
+            'is_enabled' => true,
+        ]);
+        Grocer::factory()->create([
+            'slug' => 'netto',
+            'name' => 'Netto',
+            'is_enabled' => true,
+        ]);
+        Grocer::factory()->create([
+            'slug' => 'disabled',
+            'name' => 'Disabled',
+            'is_enabled' => false,
+        ]);
+        $batch = ImportBatch::factory()->for($grocer)->create();
+        $paper = Paper::factory()->for($grocer)->for($batch, 'importBatch')->create([
+            'active_from' => now()->subDay(),
+            'active_until' => now()->addDay(),
+        ]);
+
+        ScrapedOffer::factory()
+            ->for($grocer)
+            ->for($batch, 'importBatch')
+            ->for($paper)
+            ->create(['price' => 12.00]);
+
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Home', false)
+                ->where('stores.0.slug', 'spar')
+                ->where('stores.0.name', 'SPAR')
+                ->where('stores.0.count', '1 tilbud')
+                ->where('allStoreSlugs', fn (mixed $slugs): bool => collect($slugs)->contains('netto')
+                    && collect($slugs)->contains('spar')
+                    && ! collect($slugs)->contains('disabled'))
+                ->where('enabledStoreCount', fn (int $count): bool => $count >= 2)
+                ->etc()
+            );
+    }
 }

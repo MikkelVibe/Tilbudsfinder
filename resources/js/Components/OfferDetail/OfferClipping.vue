@@ -24,6 +24,7 @@ defineProps({
         </div>
 
         <div class="mt-3 flex flex-1 flex-col border-t border-[#c9c1b4] pt-3">
+            <p v-if="offer.store" class="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#173124]">{{ offer.store }}</p>
             <h3 class="line-clamp-2 text-base font-extrabold leading-tight text-[#18251e]">{{ offer.name }}</h3>
             <p class="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-[#6f746d]">{{ offer.weight }}</p>
             <p class="mt-auto border-t border-[#d8d0c3] pt-3 font-sans text-5xl font-extrabold leading-none tracking-[-0.06em] text-[#b3261e]">

@@ -16,6 +16,8 @@ class OfferSearchController extends Controller
             grocerSlugs: $request->grocerSlugs(),
             sort: $request->sort(),
             perPage: $request->perPage(),
+            priceMin: $request->priceMin(),
+            priceMax: $request->priceMax(),
         ));
     }
 }

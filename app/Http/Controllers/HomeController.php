@@ -12,11 +12,15 @@ class HomeController extends Controller
 {
     public function __invoke(): Response
     {
+        $enabledStoreSlugs = $this->enabledStoreSlugs();
+
         return Inertia::render('Home', [
             'appName' => config('app.name'),
             'popularOffers' => $this->popularOffers(),
             'latestOffers' => $this->latestOffers(),
             'stores' => $this->stores(),
+            'allStoreSlugs' => $enabledStoreSlugs,
+            'enabledStoreCount' => count($enabledStoreSlugs),
         ]);
     }
 
@@ -62,7 +66,7 @@ class HomeController extends Controller
     private function stores(): array
     {
         return Grocer::query()
-            ->select(['id', 'name'])
+            ->select(['id', 'slug', 'name'])
             ->where('is_enabled', true)
             ->withCount(['scrapedOffers as offer_count' => fn ($query) => $query
                 ->whereHas('paper', fn ($paperQuery) => $paperQuery
@@ -73,9 +77,23 @@ class HomeController extends Controller
             ->limit(6)
             ->get()
             ->map(fn (Grocer $grocer): array => [
+                'slug' => $grocer->slug,
                 'name' => $grocer->name,
                 'count' => sprintf('%d tilbud', $grocer->offer_count),
             ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function enabledStoreSlugs(): array
+    {
+        return Grocer::query()
+            ->where('is_enabled', true)
+            ->orderBy('name')
+            ->pluck('slug')
             ->values()
             ->all();
     }

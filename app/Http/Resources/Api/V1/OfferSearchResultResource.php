@@ -20,10 +20,13 @@ class OfferSearchResultResource extends JsonResource
 
         return [
             'id' => $document->scraped_offer_id,
-            'title' => $document->title,
+            'title' => $document->canonical_product_name ?: $document->title,
             'brand' => $document->brand,
             'description' => $document->description,
             'image_url' => $document->image_url,
+            'canonical_product_id' => $document->canonical_product_id,
+            'product_offer_count' => (int) ($document->product_offer_count ?? 1),
+            'product_store_count' => (int) ($document->product_store_count ?? 1),
             'grocer' => [
                 'id' => $document->grocer_id,
                 'slug' => $document->grocer_slug,
