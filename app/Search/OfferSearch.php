@@ -4,6 +4,7 @@ namespace App\Search;
 
 use Brick\Math\BigDecimal;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Http\Client\ConnectionException;
 use RuntimeException;
 
 class OfferSearch
@@ -28,7 +29,7 @@ class OfferSearch
 
         try {
             return $this->engine->search($searchQuery);
-        } catch (RuntimeException $exception) {
+        } catch (ConnectionException|RuntimeException $exception) {
             if (! config('search.fallback_to_database', true) || $this->engine instanceof DatabaseOfferSearchEngine) {
                 throw $exception;
             }

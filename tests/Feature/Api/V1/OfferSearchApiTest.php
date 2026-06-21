@@ -118,6 +118,32 @@ class OfferSearchApiTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_it_falls_back_to_grouped_database_search_when_configured_meilisearch_connection_fails(): void
+    {
+        Config::set('search.driver', 'meilisearch');
+        Config::set('search.meilisearch.host', 'http://meili.test');
+        Http::preventStrayRequests();
+        Http::fake([
+            'http://meili.test/indexes/offers/search' => Http::failedConnection(),
+        ]);
+
+        $canonicalProduct = CanonicalProduct::factory()->create([
+            'name' => 'Premier Is Astronaut 6 x 50 ml',
+        ]);
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $this->offer($grocer, 'PREMIER IS ASTRONAUT IS 6 X 50 ML', 25.00, canonicalProduct: $canonicalProduct);
+        $this->offer($grocer, 'PREMIER IS ASTRONAUT IS 6 X 50 ML', 20.00, canonicalProduct: $canonicalProduct);
+
+        $this->getJson('/api/v1/offers/search?q=astronaut&grocers=rema1000&sort=price_asc')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.title', 'Premier Is Astronaut 6 x 50 ml')
+            ->assertJsonPath('data.0.price', '20.00')
+            ->assertJsonPath('data.0.product_offer_count', 2);
+
+        Http::assertSentCount(1);
+    }
+
     public function test_it_excludes_expired_offers(): void
     {
         $grocer = Grocer::factory()->create(['slug' => 'rema1000']);

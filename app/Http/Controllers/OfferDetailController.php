@@ -7,6 +7,7 @@ use App\Models\PriceObservation;
 use App\Models\ScrapedOffer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -46,7 +47,7 @@ class OfferDetailController extends Controller
      *     fullDescription: string|null,
      *     imageUrl: string|null,
      *     currentOffer: array{
-     *         price: string,
+     *         price: string|null,
      *         unitPrice: string|null,
      *         normalPrice: null,
      *         validUntil: string|null
@@ -292,16 +293,17 @@ class OfferDetailController extends Controller
 
         if ($remaining > 0) {
             $terms = $this->recommendationTerms($offer->title);
+            $titleLikeOperator = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
 
             $matches = $this->baseRecommendationQuery($excludedIds)
-                ->where(function (Builder $query) use ($terms, $offer): void {
+                ->where(function (Builder $query) use ($terms, $offer, $titleLikeOperator): void {
                     if ($terms->isEmpty()) {
-                        $query->where('title', 'ilike', mb_substr($offer->title, 0, 8).'%');
+                        $query->where('title', $titleLikeOperator, mb_substr($offer->title, 0, 8).'%');
 
                         return;
                     }
 
-                    $terms->each(fn (string $term) => $query->orWhere('title', 'ilike', '%'.$term.'%'));
+                    $terms->each(fn (string $term) => $query->orWhere('title', $titleLikeOperator, '%'.$term.'%'));
                 })
                 ->latest()
                 ->limit($remaining)
