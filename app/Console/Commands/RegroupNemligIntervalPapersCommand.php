@@ -42,6 +42,10 @@ class RegroupNemligIntervalPapersCommand extends Command
 
         $result = DB::transaction(fn (): array => $this->regroup($papers));
 
+        foreach ($result['deleted_raw_payload_paths'] as $path) {
+            Storage::disk('local')->delete($path);
+        }
+
         $this->info('Regrouped legacy Nemlig papers: '.$result['papers']);
         $this->info('Moved visible interval offers: '.$result['moved_offers']);
         $this->info('Discarded hidden, invalid, irrelevant, or duplicate interval offers: '.$result['discarded_offers']);
@@ -110,7 +114,7 @@ class RegroupNemligIntervalPapersCommand extends Command
 
     /**
      * @param  Collection<int, Paper>  $papers
-     * @return array{papers: int, moved_offers: int, discarded_offers: int, created_papers: int, deleted_papers: int, deleted_batches: int}
+     * @return array{papers: int, moved_offers: int, discarded_offers: int, created_papers: int, deleted_papers: int, deleted_batches: int, deleted_raw_payload_paths: list<string>}
      */
     private function regroup(Collection $papers): array
     {
@@ -119,6 +123,7 @@ class RegroupNemligIntervalPapersCommand extends Command
         $createdPapers = 0;
         $deletedPapers = 0;
         $deletedBatches = collect();
+        $deletedRawPayloadPaths = collect();
         $touchedBatchIds = collect();
         $seenOfferKeysByPaper = collect();
 
@@ -189,7 +194,7 @@ class RegroupNemligIntervalPapersCommand extends Command
                     $batch->delete();
 
                     if ($path !== null) {
-                        Storage::disk('local')->delete($path);
+                        $deletedRawPayloadPaths->push($path);
                     }
 
                     $deletedBatches->push($batch->id);
@@ -209,6 +214,7 @@ class RegroupNemligIntervalPapersCommand extends Command
             'created_papers' => $createdPapers,
             'deleted_papers' => $deletedPapers,
             'deleted_batches' => $deletedBatches->unique()->count(),
+            'deleted_raw_payload_paths' => $deletedRawPayloadPaths->values()->all(),
         ];
     }
 

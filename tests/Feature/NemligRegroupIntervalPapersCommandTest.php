@@ -92,6 +92,10 @@ class NemligRegroupIntervalPapersCommandTest extends TestCase
 
         $firstPaper = $this->legacyNemligPaper('nemlig-first-20260531220000-20260607215959');
         $secondPaper = $this->legacyNemligPaper('nemlig-second-20260531220000-20260607215959');
+        $firstBatch = $firstPaper->importBatch;
+        $secondBatch = $secondPaper->importBatch;
+        $firstRawPayloadPath = $firstBatch->raw_payload_path;
+        $secondRawPayloadPath = $secondBatch->raw_payload_path;
         $firstOffer = $this->visibleOffer($firstPaper, '5070001');
         $secondOffer = $this->visibleOffer($secondPaper, '5070001');
 
@@ -104,8 +108,12 @@ class NemligRegroupIntervalPapersCommandTest extends TestCase
 
         $this->assertModelExists($firstOffer);
         $this->assertModelMissing($secondOffer);
+        $this->assertModelExists($firstBatch);
+        $this->assertModelMissing($secondBatch);
         $this->assertSame($intervalPaper->id, $firstOffer->refresh()->paper_id);
         $this->assertSame(1, ScrapedOffer::query()->where('paper_id', $intervalPaper->id)->count());
+        Storage::disk('local')->assertExists($firstRawPayloadPath);
+        Storage::disk('local')->assertMissing($secondRawPayloadPath);
     }
 
     private function legacyNemligPaper(string $sourceExternalId = 'nemlig-legacy'): Paper
