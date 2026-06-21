@@ -35,24 +35,21 @@ class DagrofaScraper implements GrocerScraper
      */
     public function discoverPapers(?callable $progress = null): array
     {
-        $now = CarbonImmutable::now();
         $metadata = $this->fetchIpaperMetadata();
-        $hasStablePaperMetadata = isset($metadata['paper_uuid'], $metadata['active_from'], $metadata['active_until']);
-        $sourceExternalId = $hasStablePaperMetadata ? $metadata['paper_uuid'] : $this->chain->key.'-'.$now->format('Y-m-d');
-        $title = $metadata['title'] ?? $this->chain->name.' aktuelle tilbud';
-        $sourceUrl = $metadata['source_url'] ?? $this->chain->sourceUrl;
-        $activeFrom = $metadata['active_from'] ?? $now->startOfDay()->toIso8601String();
-        $activeUntil = $metadata['active_until'] ?? $now->endOfDay()->toIso8601String();
+
+        if (! isset($metadata['paper_uuid'], $metadata['active_from'], $metadata['active_until'])) {
+            throw new ScraperFetchException("{$this->chain->name} iPaper metadata did not contain a stable paper UUID and validity dates.");
+        }
 
         return [new PaperCandidate(
-            sourceExternalId: $sourceExternalId,
-            title: $title,
+            sourceExternalId: $metadata['paper_uuid'],
+            title: $metadata['title'] ?? $this->chain->name.' aktuelle tilbud',
             sourcePayload: [
-                'source_external_id' => $sourceExternalId,
-                'label' => $title,
-                'run_from' => $activeFrom,
-                'run_till' => $activeUntil,
-                'source_url' => $sourceUrl,
+                'source_external_id' => $metadata['paper_uuid'],
+                'label' => $metadata['title'] ?? $this->chain->name.' aktuelle tilbud',
+                'run_from' => $metadata['active_from'],
+                'run_till' => $metadata['active_until'],
+                'source_url' => $metadata['source_url'] ?? $this->chain->sourceUrl,
                 'ipaper_paper_id' => $metadata['paper_id'] ?? null,
             ],
         )];
@@ -214,18 +211,31 @@ class DagrofaScraper implements GrocerScraper
      */
     private function activePeriodFromText(string $body): array
     {
-        if (preg_match('/g(?:æ|ae)lder.{0,300}?(?<from>\d{1,2}\.\d{1,2}\.\d{4}).{0,300}?(?<until>\d{1,2}\.\d{1,2}\.\d{4})/isu', $body, $matches) !== 1) {
+        if (preg_match('/g(?:æ|ae)lder.{0,300}?(?<from>\d{1,2}\.\d{1,2}\.\d{4}).{0,300}?(?<until>\d{1,2}\.\d{1,2}\.\d{4})/isu', $body, $matches) === 1) {
+            return $this->activePeriodFromDates(
+                $this->parseNumericIpaperDate($matches['from']),
+                $this->parseNumericIpaperDate($matches['until']),
+            );
+        }
+
+        if (preg_match('/g(?:æ|ae)lder.{0,300}?(?<from_day>\d{1,2})\.\s*(?<from_month>[[:alpha:]æøåÆØÅ]+)(?:\s+(?<from_year>\d{4}))?.{0,300}?(?<until_day>\d{1,2})\.\s*(?<until_month>[[:alpha:]æøåÆØÅ]+)\s+(?<until_year>\d{4})/isu', $body, $matches) !== 1) {
             return [];
         }
 
-        $activeFrom = $this->parseIpaperDate($matches['from'])?->startOfDay();
-        $activeUntil = $this->parseIpaperDate($matches['until'])?->endOfDay();
+        $untilYear = (int) $matches['until_year'];
 
-        if ($activeFrom === null || $activeUntil === null) {
-            return [];
-        }
+        return $this->activePeriodFromDates(
+            $this->parseTextualIpaperDate((int) $matches['from_day'], $matches['from_month'], isset($matches['from_year']) && $matches['from_year'] !== '' ? (int) $matches['from_year'] : $untilYear),
+            $this->parseTextualIpaperDate((int) $matches['until_day'], $matches['until_month'], $untilYear),
+        );
+    }
 
-        if ($activeUntil->lessThan($activeFrom)) {
+    private function activePeriodFromDates(?CarbonImmutable $from, ?CarbonImmutable $until): array
+    {
+        $activeFrom = $from?->startOfDay();
+        $activeUntil = $until?->endOfDay();
+
+        if ($activeFrom === null || $activeUntil === null || $activeUntil->lessThan($activeFrom)) {
             return [];
         }
 
@@ -235,7 +245,7 @@ class DagrofaScraper implements GrocerScraper
         ];
     }
 
-    private function parseIpaperDate(string $date): ?CarbonImmutable
+    private function parseNumericIpaperDate(string $date): ?CarbonImmutable
     {
         $parsed = CarbonImmutable::createFromFormat('!d.m.Y', $date);
         $errors = CarbonImmutable::getLastErrors();
@@ -247,6 +257,55 @@ class DagrofaScraper implements GrocerScraper
         }
 
         return $parsed;
+    }
+
+    private function parseTextualIpaperDate(int $day, string $month, int $year): ?CarbonImmutable
+    {
+        $monthNumber = $this->danishMonthNumber($month);
+
+        if ($monthNumber === null) {
+            return null;
+        }
+
+        $parsed = CarbonImmutable::createFromFormat('!Y-n-j', "{$year}-{$monthNumber}-{$day}");
+        $errors = CarbonImmutable::getLastErrors();
+
+        if ($parsed === false
+            || (($errors['warning_count'] ?? 0) > 0)
+            || (($errors['error_count'] ?? 0) > 0)) {
+            return null;
+        }
+
+        return $parsed;
+    }
+
+    private function danishMonthNumber(string $month): ?int
+    {
+        return [
+            'januar' => 1,
+            'jan' => 1,
+            'februar' => 2,
+            'feb' => 2,
+            'marts' => 3,
+            'mar' => 3,
+            'april' => 4,
+            'apr' => 4,
+            'maj' => 5,
+            'juni' => 6,
+            'jun' => 6,
+            'juli' => 7,
+            'jul' => 7,
+            'august' => 8,
+            'aug' => 8,
+            'september' => 9,
+            'sep' => 9,
+            'oktober' => 10,
+            'okt' => 10,
+            'november' => 11,
+            'nov' => 11,
+            'december' => 12,
+            'dec' => 12,
+        ][mb_strtolower(trim($month), 'UTF-8')] ?? null;
     }
 
     private function extractIpaperString(string $body, string $key): ?string

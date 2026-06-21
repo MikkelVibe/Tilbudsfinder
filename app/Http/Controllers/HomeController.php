@@ -48,7 +48,7 @@ class HomeController extends Controller
                 'title' => $offer->title,
                 'price' => $this->formatDecimal($offer->price),
                 'meta' => collect([$this->formatOfferAmount($offer) ?: 'UKENDT MÆNGDE', $this->formatUnitPrice($offer) ?: 'UKENDT/STK'])->join(' · '),
-                'imageUrl' => $offer->image_url,
+                'imageUrl' => $this->imageUrl($offer),
                 'fallbackLabel' => mb_substr($offer->title, 0, 8),
                 'color' => 'bg-[#f5f3ee]',
             ])
@@ -86,9 +86,11 @@ class HomeController extends Controller
     private function activeOffersQuery(): Builder
     {
         return ScrapedOffer::query()
-            ->select(['id', 'grocer_id', 'paper_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit', 'compare_unit', 'unit_price', 'created_at'])
+            ->select(['id', 'grocer_id', 'paper_id', 'grocer_product_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit', 'compare_unit', 'unit_price', 'created_at'])
             ->with([
+                'grocerProduct:id,image_url',
                 'paper:id,active_from,active_until',
+                'productMatch.canonicalProduct:id,image_url',
             ])
             ->whereNotNull('price')
             ->whereHas('paper', fn ($query) => $query
@@ -104,7 +106,7 @@ class HomeController extends Controller
         return [
             'id' => $offer->id,
             'title' => $offer->title,
-            'imageUrl' => $offer->image_url,
+            'imageUrl' => $this->imageUrl($offer),
             'amount' => $this->formatOfferAmount($offer),
             'price' => $this->formatDecimal($offer->price),
             'unitPrice' => $this->formatUnitPrice($offer),
@@ -121,6 +123,13 @@ class HomeController extends Controller
         }
 
         return number_format((float) $value, 2, ',', '');
+    }
+
+    private function imageUrl(ScrapedOffer $offer): ?string
+    {
+        return $offer->image_url
+            ?: $offer->grocerProduct?->image_url
+            ?: $offer->productMatch?->canonicalProduct?->image_url;
     }
 
     private function formatOfferAmount(ScrapedOffer $offer): ?string

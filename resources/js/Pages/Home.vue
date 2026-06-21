@@ -103,7 +103,7 @@ function markImageLoaded(key) {
                                         :src="offer.imageUrl"
                                         :alt="offer.title"
                                         :class="[
-                                            'h-full w-full object-cover object-center transition-opacity duration-200',
+                                            'absolute inset-0 size-full object-contain object-center transition-opacity duration-200',
                                             loadedImages[`popular-${offer.id}`] ? 'opacity-100' : 'opacity-0',
                                         ]"
                                         loading="lazy"
@@ -158,7 +158,7 @@ function markImageLoaded(key) {
                                         :src="offer.imageUrl"
                                         :alt="offer.title"
                                         :class="[
-                                            'h-full w-full object-contain object-center transition-opacity duration-200',
+                                            'absolute inset-0 size-full object-contain object-center transition-opacity duration-200',
                                             loadedImages[`latest-${offer.id}`] ? 'opacity-100' : 'opacity-0',
                                         ]"
                                         loading="lazy"

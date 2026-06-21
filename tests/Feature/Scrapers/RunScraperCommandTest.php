@@ -115,6 +115,27 @@ class RunScraperCommandTest extends TestCase
         $this->assertSame(12, Paper::query()->withCount('scrapedOffers')->firstOrFail()->scraped_offers_count);
     }
 
+    public function test_it_imports_small_nemlig_interval_papers(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        $this->fakeNemligResponses(5);
+        Grocer::factory()->create(['slug' => 'nemlig', 'name' => 'Nemlig']);
+
+        $this->artisan('scraper:run nemlig')
+            ->expectsOutput('Scraper [nemlig] completed.')
+            ->expectsOutput('Fetched papers: 1')
+            ->expectsOutput('Imported papers: 1')
+            ->expectsOutput('Skipped duplicates: 0')
+            ->assertSuccessful();
+
+        $this->assertSame(1, ImportBatch::query()->count());
+        $this->assertSame(1, Paper::query()->count());
+        $this->assertSame(5, ImportBatch::query()->firstOrFail()->parsed_offer_count);
+        $this->assertSame(5, Paper::query()->withCount('scrapedOffers')->firstOrFail()->scraped_offers_count);
+    }
+
     public function test_it_skips_duplicate_rema_papers(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
@@ -233,7 +254,7 @@ class RunScraperCommandTest extends TestCase
         ]);
     }
 
-    private function fakeNemligResponses(): void
+    private function fakeNemligResponses(int $offerCount = 12): void
     {
         Http::fake([
             'www.nemlig.com/tilbud*' => Http::response([
@@ -246,15 +267,15 @@ class RunScraperCommandTest extends TestCase
                 ],
                 'content' => [
                     ['Heading' => 'Sponsoreret', 'ProductGroupId' => 'sponsored-group', 'TotalProducts' => 7],
-                    ['Heading' => 'Skarp pris', 'ProductGroupId' => 'group-1', 'TotalProducts' => 12],
+                    ['Heading' => 'Skarp pris', 'ProductGroupId' => 'group-1', 'TotalProducts' => $offerCount],
                 ],
             ]),
             'www.nemlig.com/webapi/Token' => Http::response(['access_token' => 'test-token']),
             'www.nemlig.com/webapi/AAAAAAAA-oLJ90N-_/2026060208-60-600/1/0/Products/GetByProductGroupId?productGroupId=group-1&pageIndex=0&pagesize=200' => Http::response([
-                'Products' => array_map(fn (int $number): array => $this->nemligOffer($number), range(1, 12)),
+                'Products' => array_map(fn (int $number): array => $this->nemligOffer($number), range(1, $offerCount)),
                 'ProductGroupId' => 'group-1',
                 'Start' => 0,
-                'NumFound' => 12,
+                'NumFound' => $offerCount,
             ]),
             'www.nemlig.com/webapi/AAAAAAAA/2026060208-60-600/1/0/Products/Get?id=*' => Http::response([
                 'Declarations' => ['ShowDeclarations' => false],
@@ -467,6 +488,7 @@ class RunScraperCommandTest extends TestCase
                 'Code' => 'US',
                 'IntervalStart' => '2026-05-31T22:00:00Z',
                 'IntervalEnd' => '2026-06-07T21:59:59Z',
+                'ShowCampaignInterval' => true,
             ],
         ];
     }
