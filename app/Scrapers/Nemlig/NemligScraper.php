@@ -11,8 +11,10 @@ use App\Scrapers\Support\KnownPaperPayload;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use JsonException;
 
 class NemligScraper implements GrocerScraper
@@ -26,6 +28,23 @@ class NemligScraper implements GrocerScraper
      */
     private const EXCLUDED_GROUP_HEADINGS = [
         'sponsoreret',
+    ];
+
+    private const ALLOWED_PRODUCT_CATEGORIES = [
+        'drikke',
+        'frost',
+        'grønt',
+        'kiosk',
+        'kolonial',
+        'kød & fisk',
+        'køl',
+        'pleje',
+        'vin',
+    ];
+
+    private const EXCLUDED_PRODUCT_SUBCATEGORIES = [
+        'lingeri',
+        'tobakstilbehør',
     ];
 
     public function __construct(
@@ -120,12 +139,32 @@ class NemligScraper implements GrocerScraper
             throw new ScraperFetchException('Nemlig returned no campaign products from offers groups.');
         }
 
+        $intervalGroups = $this->intervalGroups($products);
+
+        if ($intervalGroups['groups']->isEmpty()) {
+            throw new ScraperFetchException('Nemlig returned no visible campaign products with valid intervals.');
+        }
+
         $this->progress($progress, 'Fetching Nemlig product details...');
-        $products = $this->enrichProductDetails($settings, $products, $token);
+        $products = $this->enrichProductDetails($settings, $intervalGroups['groups']->flatten(1)->values()->all(), $token);
+        $productsById = collect($products)
+            ->keyBy(fn (array $product): string => $this->optionalScalarString($product, 'Id') ?? spl_object_id((object) $product));
 
-        $this->progress($progress, 'Fetched '.count($products).' Nemlig campaign products from '.count($groupsFetched).' groups.');
+        $payloads = $intervalGroups['groups']
+            ->map(function (array $groupProducts, string $intervalKey) use ($candidate, $settings, $groupsFetched, $productsById, $intervalGroups): RawPaperPayload {
+                $products = collect($groupProducts)
+                    ->map(fn (array $product): array => $productsById->get($this->optionalScalarString($product, 'Id') ?? '', $product))
+                    ->values()
+                    ->all();
 
-        return [$this->rawPayload($candidate, $settings, $groupsFetched, $products)];
+                return $this->rawPayload($candidate, $settings, $groupsFetched, $products, $intervalKey, $intervalGroups['skipped_hidden'], $intervalGroups['skipped_invalid'], $intervalGroups['skipped_irrelevant']);
+            })
+            ->values()
+            ->all();
+
+        $this->progress($progress, 'Fetched '.count($products).' visible Nemlig campaign products into '.count($payloads).' interval papers from '.count($groupsFetched).' groups.');
+
+        return $payloads;
     }
 
     public function parse(RawPaperPayload $payload): ParsedPaperInput
@@ -323,15 +362,14 @@ class NemligScraper implements GrocerScraper
      * @param  list<array<string, mixed>>  $groupsFetched
      * @param  list<array<string, mixed>>  $products
      */
-    private function rawPayload(PaperCandidate $candidate, array $settings, array $groupsFetched, array $products): RawPaperPayload
+    private function rawPayload(PaperCandidate $candidate, array $settings, array $groupsFetched, array $products, string $intervalKey, int $skippedHidden, int $skippedInvalid, int $skippedIrrelevant): RawPaperPayload
     {
-        $campaignDates = $this->campaignDates($products);
-        $activeFrom = $campaignDates['active_from'] ?? CarbonImmutable::now()->startOfDay();
-        $activeUntil = $campaignDates['active_until'] ?? CarbonImmutable::now()->endOfDay();
+        [$activeFrom, $activeUntil] = $this->intervalDates($intervalKey);
+        $sourceExternalId = $this->intervalSourceExternalId($activeFrom, $activeUntil);
 
         $rawPayload = $this->encode([
             'catalog' => [
-                'id' => $candidate->sourceExternalId,
+                'id' => $sourceExternalId,
                 'label' => 'Nemlig tilbud '.$activeFrom->format('Y-m-d').' - '.$activeUntil->format('Y-m-d'),
                 'run_from' => $activeFrom->toIso8601String(),
                 'run_till' => $activeUntil->toIso8601String(),
@@ -340,6 +378,11 @@ class NemligScraper implements GrocerScraper
                 'source_strategy' => 'nemlig_product_groups',
                 'fetched_offer_count' => count($products),
                 'groups' => $groupsFetched,
+                'interval_key' => $intervalKey,
+                'base_source_external_id' => $candidate->sourceExternalId,
+                'skipped_hidden_interval_offer_count' => $skippedHidden,
+                'skipped_invalid_interval_offer_count' => $skippedInvalid,
+                'skipped_irrelevant_offer_count' => $skippedIrrelevant,
                 'settings' => [
                     'timeslot_utc' => Arr::get($settings, 'TimeslotUtc'),
                     'delivery_zone_id' => Arr::get($settings, 'DeliveryZoneId'),
@@ -351,7 +394,7 @@ class NemligScraper implements GrocerScraper
         ]);
 
         return new RawPaperPayload(
-            sourceExternalId: $candidate->sourceExternalId,
+            sourceExternalId: $sourceExternalId,
             rawPayload: $rawPayload,
             title: 'Nemlig tilbud',
         );
@@ -379,32 +422,106 @@ class NemligScraper implements GrocerScraper
         );
     }
 
+    private function intervalSourceExternalId(CarbonImmutable $activeFrom, CarbonImmutable $activeUntil): string
+    {
+        return sprintf(
+            'nemlig-%s-%s',
+            $activeFrom->setTimezone('UTC')->format('YmdHis'),
+            $activeUntil->setTimezone('UTC')->format('YmdHis'),
+        );
+    }
+
     /**
      * @param  list<array<string, mixed>>  $products
-     * @return array{active_from?: CarbonImmutable, active_until?: CarbonImmutable}
+     * @return array{groups: Collection<string, list<array<string, mixed>>>, skipped_hidden: int, skipped_invalid: int, skipped_irrelevant: int}
      */
-    private function campaignDates(array $products): array
+    private function intervalGroups(array $products): array
     {
-        $starts = [];
-        $ends = [];
+        $groups = collect();
+        $skippedHidden = 0;
+        $skippedInvalid = 0;
+        $skippedIrrelevant = 0;
 
         foreach ($products as $product) {
-            $start = $this->optionalString($product, 'Campaign.IntervalStart');
-            $end = $this->optionalString($product, 'Campaign.IntervalEnd');
+            if (! $this->isRelevantProduct($product)) {
+                $skippedIrrelevant++;
 
-            if ($start !== null) {
-                $starts[] = CarbonImmutable::parse($start);
+                continue;
             }
 
-            if ($end !== null) {
-                $ends[] = CarbonImmutable::parse($end);
+            if (Arr::get($product, 'Campaign.ShowCampaignInterval') !== true) {
+                $skippedHidden++;
+
+                continue;
             }
+
+            $intervalKey = $this->intervalKey($product);
+
+            if ($intervalKey === null) {
+                $skippedInvalid++;
+
+                continue;
+            }
+
+            $groups[$intervalKey] = [
+                ...($groups[$intervalKey] ?? []),
+                $product,
+            ];
         }
 
-        return array_filter([
-            'active_from' => $starts === [] ? null : min($starts),
-            'active_until' => $ends === [] ? null : max($ends),
-        ]);
+        return [
+            'groups' => $groups->sortKeys(),
+            'skipped_hidden' => $skippedHidden,
+            'skipped_invalid' => $skippedInvalid,
+            'skipped_irrelevant' => $skippedIrrelevant,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $product
+     */
+    private function isRelevantProduct(array $product): bool
+    {
+        $category = $this->normalizedText($this->optionalString($product, 'Category'));
+        $subcategory = $this->normalizedText($this->optionalString($product, 'SubCategory'));
+
+        return in_array($category, self::ALLOWED_PRODUCT_CATEGORIES, true)
+            && ! in_array($subcategory, self::EXCLUDED_PRODUCT_SUBCATEGORIES, true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $product
+     */
+    private function intervalKey(array $product): ?string
+    {
+        $start = $this->optionalString($product, 'Campaign.IntervalStart');
+        $end = $this->optionalString($product, 'Campaign.IntervalEnd');
+
+        if ($start === null || $end === null) {
+            return null;
+        }
+
+        try {
+            [$activeFrom, $activeUntil] = [CarbonImmutable::parse($start), CarbonImmutable::parse($end)];
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+
+        if ($activeFrom->greaterThanOrEqualTo($activeUntil)) {
+            return null;
+        }
+
+        return $activeFrom->toIso8601String().'|'.$activeUntil->toIso8601String();
+    }
+
+    /**
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable}
+     */
+    private function intervalDates(string $intervalKey): array
+    {
+        [$start, $end] = explode('|', $intervalKey, 2);
+
+        return [CarbonImmutable::parse($start), CarbonImmutable::parse($end)];
     }
 
     private function http(): PendingRequest
@@ -503,6 +620,11 @@ class NemligScraper implements GrocerScraper
         }
 
         return null;
+    }
+
+    private function normalizedText(?string $value): string
+    {
+        return mb_strtolower(trim((string) $value));
     }
 
     /**

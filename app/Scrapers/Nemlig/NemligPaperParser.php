@@ -37,6 +37,11 @@ class NemligPaperParser
                 'dealer_name' => $this->optionalString($catalog, 'dealer.name'),
                 'fetched_offer_count' => Arr::get($catalog, 'fetched_offer_count'),
                 'source_strategy' => $this->optionalString($catalog, 'source_strategy'),
+                'interval_key' => $this->optionalString($catalog, 'interval_key'),
+                'base_source_external_id' => $this->optionalString($catalog, 'base_source_external_id'),
+                'skipped_hidden_interval_offer_count' => Arr::get($catalog, 'skipped_hidden_interval_offer_count'),
+                'skipped_invalid_interval_offer_count' => Arr::get($catalog, 'skipped_invalid_interval_offer_count'),
+                'skipped_irrelevant_offer_count' => Arr::get($catalog, 'skipped_irrelevant_offer_count'),
                 'groups' => Arr::get($catalog, 'groups'),
             ], static fn (mixed $value): bool => $value !== null),
         );
@@ -348,7 +353,7 @@ class NemligPaperParser
 
     private function validateQuality(ParsedPaperInput $paper): void
     {
-        if (count($paper->offers) < self::MINIMUM_PARSED_OFFERS) {
+        if (! $this->allowsSmallParsedOfferCount($paper) && count($paper->offers) < self::MINIMUM_PARSED_OFFERS) {
             throw new ScraperParseException('Nemlig paper must contain at least '.self::MINIMUM_PARSED_OFFERS.' parsed offers.');
         }
 
@@ -359,6 +364,12 @@ class NemligPaperParser
         }
 
         throw new ScraperParseException('Nemlig paper produced zero publishable offers.');
+    }
+
+    private function allowsSmallParsedOfferCount(ParsedPaperInput $paper): bool
+    {
+        return ($paper->metadata['source_strategy'] ?? null) === 'nemlig_product_groups'
+            && isset($paper->metadata['interval_key']);
     }
 
     /**

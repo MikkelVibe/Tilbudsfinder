@@ -177,13 +177,19 @@ class ImportPersistencePipeline
 
     private function validateInput(Grocer $grocer, ParsedPaperInput $paperInput): void
     {
-        if (count($paperInput->offers) < self::MINIMUM_PARSED_OFFERS) {
+        if (! $this->allowsSmallParsedOfferCount($paperInput) && count($paperInput->offers) < self::MINIMUM_PARSED_OFFERS) {
             throw new ImportPipelineException('Parsed paper must contain at least '.self::MINIMUM_PARSED_OFFERS.' offers.');
         }
 
         if (Paper::query()->where('grocer_id', $grocer->id)->where('source_external_id', $paperInput->sourceExternalId)->exists()) {
             throw new DuplicatePaperImportException('Paper has already been imported for this grocer.');
         }
+    }
+
+    private function allowsSmallParsedOfferCount(ParsedPaperInput $paperInput): bool
+    {
+        return ($paperInput->metadata['source_strategy'] ?? null) === 'nemlig_product_groups'
+            && isset($paperInput->metadata['interval_key']);
     }
 
     private function storeRawPayload(ImportBatch $batch, Grocer $grocer, ParsedPaperInput $paperInput): void

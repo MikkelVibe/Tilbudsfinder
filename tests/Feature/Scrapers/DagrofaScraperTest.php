@@ -5,6 +5,7 @@ namespace Tests\Feature\Scrapers;
 use App\Scrapers\Dagrofa\MenyScraper;
 use App\Scrapers\Dagrofa\MinKobmandScraper;
 use App\Scrapers\Dagrofa\SparScraper;
+use App\Scrapers\Exceptions\ScraperFetchException;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -16,7 +17,7 @@ class DagrofaScraperTest extends TestCase
         CarbonImmutable::setTestNow('2026-05-31 12:00:00');
         Http::preventStrayRequests();
         Http::fake([
-            'ugensavis.spar.dk/' => Http::response('<script>window.staticSettings = { paperId: 3033533, name: "SPAR uge 2426", aws: { url: "https://b2-cdn.ipaper.io/iPaper/Papers/351b1b4c-8f34-4c02-8664-bb16f02c3da8/" } };</script><div>Avisen gælder fra 05.06.2026 til og med 11.06.2026</div>'),
+            'ugensavis.spar.dk/' => Http::response($this->ipaperHtml('SPAR uge 2426', 3033533, '351b1b4c-8f34-4c02-8664-bb16f02c3da8', 'Avisen gælder fra fredag 05.06.2026 til og med torsdag 11.06.2026')),
             'longjohnapi.azurewebsites.net/Product/query*' => Http::response([
                 'total' => 3,
                 'products' => [
@@ -45,18 +46,32 @@ class DagrofaScraperTest extends TestCase
         $this->assertSame('Kyllingebryst', $payload['offers'][0]['productDisplayName']);
     }
 
-    public function test_it_falls_back_to_dated_dagrofa_id_when_ipaper_metadata_is_unavailable(): void
+    public function test_it_extracts_stable_ipaper_metadata_for_all_dagrofa_chains(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'ugensavis.meny.dk/' => Http::response($this->ipaperHtml('MENY uge 2626', 3036608, 'e0b9b026-1bf3-4a6f-8bdf-6019d48205db', 'Avisen gælder fra fredag 19.06.2026 til og med torsdag 25.06.2026')),
+            'ugensavis.spar.dk/' => Http::response($this->ipaperHtml('SPAR uge 2626', 3037035, '70ff60cc-fc5d-4d7a-b67e-5f06d5feaaf4', 'Avisen gælder fra fredag 19.06.2026 til og med torsdag 25.06.2026')),
+            'ugensavis.xn--minkbmand-o8a.dk/' => Http::response($this->ipaperHtml('MK uge 2626', 3037015, 'ebb4a0c3-2124-43de-9612-f4dab0797088', 'Avisen gælder fra fredag 19. juni til og med torsdag 25. juni 2026')),
+        ]);
+
+        $this->assertDiscoveredPaper(new MenyScraper, 'e0b9b026-1bf3-4a6f-8bdf-6019d48205db', 'MENY uge 2626', 3036608, '2026-06-19T00:00:00+00:00', '2026-06-25T23:59:59+00:00', 'https://ugensavis.meny.dk/');
+        $this->assertDiscoveredPaper(new SparScraper, '70ff60cc-fc5d-4d7a-b67e-5f06d5feaaf4', 'SPAR uge 2626', 3037035, '2026-06-19T00:00:00+00:00', '2026-06-25T23:59:59+00:00', 'https://ugensavis.spar.dk/');
+        $this->assertDiscoveredPaper(new MinKobmandScraper, 'ebb4a0c3-2124-43de-9612-f4dab0797088', 'MK uge 2626', 3037015, '2026-06-19T00:00:00+00:00', '2026-06-25T23:59:59+00:00', 'https://ugensavis.xn--minkbmand-o8a.dk/');
+    }
+
+    public function test_it_rejects_unstable_ipaper_metadata_instead_of_creating_dated_dagrofa_ids(): void
     {
         CarbonImmutable::setTestNow('2026-05-31 12:00:00');
         Http::preventStrayRequests();
         Http::fake([
-            'ugensavis.spar.dk/' => Http::response('<script>window.staticSettings = { name: "SPAR uge 2426", aws: { url: "https://b2-cdn.ipaper.io/iPaper/Papers/351b1b4c-8f34-4c02-8664-bb16f02c3da8/" } };</script><div>Avisen gælder fra 31.02.2026 til og med 04.03.2026</div>'),
+            'ugensavis.spar.dk/' => Http::response($this->ipaperHtml('SPAR uge 2426', 3033533, '351b1b4c-8f34-4c02-8664-bb16f02c3da8', 'Avisen gælder fra 31.02.2026 til og med 04.03.2026')),
         ]);
 
-        $payloads = (new SparScraper)->discoverPapers();
+        $this->expectException(ScraperFetchException::class);
+        $this->expectExceptionMessage('SPAR iPaper metadata did not contain a stable paper UUID and validity dates.');
 
-        $this->assertSame('spar-2026-05-31', $payloads[0]->sourceExternalId);
-        $this->assertSame('SPAR uge 2426', $payloads[0]->title);
+        (new SparScraper)->discoverPapers();
     }
 
     public function test_chain_wrappers_use_expected_keys(): void
@@ -64,6 +79,41 @@ class DagrofaScraperTest extends TestCase
         $this->assertSame('meny', (new MenyScraper)->grocerKey());
         $this->assertSame('spar', (new SparScraper)->grocerKey());
         $this->assertSame('minkobmand', (new MinKobmandScraper)->grocerKey());
+    }
+
+    private function assertDiscoveredPaper(
+        MenyScraper|SparScraper|MinKobmandScraper $scraper,
+        string $sourceExternalId,
+        string $title,
+        int $paperId,
+        string $activeFrom,
+        string $activeUntil,
+        string $sourceUrl,
+    ): void {
+        $payloads = $scraper->discoverPapers();
+
+        $this->assertCount(1, $payloads);
+        $this->assertSame($sourceExternalId, $payloads[0]->sourceExternalId);
+        $this->assertSame($title, $payloads[0]->title);
+        $this->assertSame($sourceExternalId, $payloads[0]->sourcePayload['source_external_id']);
+        $this->assertSame($activeFrom, $payloads[0]->sourcePayload['run_from']);
+        $this->assertSame($activeUntil, $payloads[0]->sourcePayload['run_till']);
+        $this->assertSame($paperId, $payloads[0]->sourcePayload['ipaper_paper_id']);
+        $this->assertSame($sourceUrl, $payloads[0]->sourcePayload['source_url']);
+    }
+
+    private function ipaperHtml(string $title, int $paperId, string $paperUuid, string $validityText): string
+    {
+        return <<<HTML
+        <script>
+            window.staticSettings = {
+                paperId: {$paperId},
+                name: "{$title}",
+                aws: { url: "https://b2-cdn.ipaper.io/iPaper/Papers/{$paperUuid}/" }
+            };
+        </script>
+        <div>{$validityText}</div>
+        HTML;
     }
 
     /**

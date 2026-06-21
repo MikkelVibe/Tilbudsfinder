@@ -45,6 +45,7 @@ readonly class DagrofaChain
             merchantId: 1302,
             baseUrl: 'https://longjohnapi.azurewebsites.net',
             sourceUrl: 'https://min-kobmand.dk/',
+            iPaperUrl: 'https://ugensavis.xn--minkbmand-o8a.dk/',
         );
     }
 }
