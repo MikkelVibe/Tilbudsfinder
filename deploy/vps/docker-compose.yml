@@ -9,6 +9,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - meilisearch
 
   web:
     image: nginx:1.27-alpine
@@ -30,6 +31,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - meilisearch
 
   scheduler:
     image: ${TILBUDSFINDER_IMAGE:?Set TILBUDSFINDER_IMAGE}
@@ -40,12 +42,25 @@ services:
     depends_on:
       - postgres
       - redis
+      - meilisearch
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
       - redis-data:/data
+
+  meilisearch:
+    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.47.0}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_KEY:?Set MEILISEARCH_KEY}
+      MEILI_ENV: ${MEILI_ENV:-production}
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilisearch-data:/meili_data
 
   postgres:
     image: postgres:16-alpine
@@ -64,3 +79,4 @@ volumes:
   public-data:
   postgres-data:
   redis-data:
+  meilisearch-data:

@@ -1,40 +1,43 @@
 <script setup>
+import { computed } from 'vue';
 import NoImagePlaceholder from './NoImagePlaceholder.vue';
 
-defineProps({
+const props = defineProps({
     product: {
         type: Object,
         required: true,
     },
 });
+
+const titleParts = computed(() => String(props.product.name || '').split('&'));
 </script>
 
 <template>
-    <section class="grid gap-6 border-b border-[#c9c1b4] py-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-8 lg:py-10">
-        <div class="relative order-2 grid min-h-[260px] w-full place-items-stretch overflow-hidden border border-[#d8d0c3] bg-[#eee8dd] p-0 sm:min-h-[340px] lg:order-1 lg:min-h-[500px]">
+    <section class="grid items-stretch gap-6 border-b border-[#c9c1b4] py-7 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-8">
+        <div class="relative order-2 grid h-[320px] w-full place-items-center overflow-hidden border border-[#d8d0c3] bg-[#eee8dd] p-0 sm:h-[420px] lg:order-1 lg:h-[560px]">
             <img
                 v-if="product.imageUrl"
                 :src="product.imageUrl"
                 :alt="product.name"
-                class="absolute inset-0 size-full object-contain object-center"
+                class="absolute inset-0 size-full object-contain object-center p-4"
             >
             <NoImagePlaceholder v-else />
         </div>
 
-        <aside class="order-1 flex flex-col border border-[#c9c1b4] bg-[#f5f3ee] p-5 sm:p-6 lg:order-2">
+        <aside class="order-1 flex flex-col overflow-hidden border border-[#c9c1b4] bg-[#f5f3ee] p-5 sm:p-6 lg:order-2 lg:min-h-[560px]">
             <p class="border-b border-[#c9c1b4] pb-4 text-[10px] font-black uppercase tracking-[0.24em] text-[#6f746d]">Gælder nu</p>
 
-            <div class="py-6 text-center sm:text-left">
+            <div class="min-h-0 flex-1 py-6 text-center sm:text-left">
                 <p class="mb-3 text-[10px] font-black uppercase tracking-[0.28em] text-[#6f746d]">Tilbud</p>
-                <h1 class="font-serif text-5xl font-bold leading-[0.9] tracking-[-0.06em] text-[#18251e] sm:text-6xl">
-                    {{ product.name }}
+                <h1 class="max-w-full break-words font-serif text-3xl font-bold leading-[0.98] text-[#18251e] [overflow-wrap:anywhere] sm:text-4xl xl:text-[2.65rem]">
+                    <template v-for="(part, index) in titleParts" :key="`${part}-${index}`">
+                        <span>{{ part }}</span>
+                        <span v-if="index < titleParts.length - 1" class="font-sans text-[0.78em] font-black tracking-normal">&amp;</span>
+                    </template>
                 </h1>
-                <p v-if="product.description" class="mt-4 text-sm italic leading-6 text-[#4a4a4a]">
-                    {{ product.description }}
-                </p>
             </div>
 
-            <div class="divide-y divide-[#d8d0c3] border-y border-[#d8d0c3] bg-[#fbf9f4]">
+            <div class="mt-auto divide-y divide-[#d8d0c3] border-y border-[#d8d0c3] bg-[#fbf9f4]">
                 <dl class="grid gap-1 py-4">
                     <dt class="px-4 text-[10px] font-black uppercase tracking-[0.22em] text-[#6f746d]">Gælder til og med</dt>
                     <dd class="px-4 text-sm font-extrabold text-[#18251e]">{{ product.currentOffer.validUntil }}</dd>

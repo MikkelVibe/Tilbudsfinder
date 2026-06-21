@@ -10,8 +10,8 @@ import { Link } from '@inertiajs/vue3';
             </Link>
 
             <nav aria-label="Primær navigation" class="hidden items-center gap-8 text-xs font-extrabold uppercase tracking-[0.22em] text-[#173124] md:flex">
-                <Link href="/#search" class="transition hover:text-[#b3261e]">Søg tilbud</Link>
-                <Link href="/#stores" class="transition hover:text-[#b3261e]">Butikker</Link>
+                <Link href="/tilbud" class="transition hover:text-[#b3261e]">Søg tilbud</Link>
+                <Link href="/butikker" class="transition hover:text-[#b3261e]">Butikker</Link>
             </nav>
         </div>
     </header>

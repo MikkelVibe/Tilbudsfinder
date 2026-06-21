@@ -7,12 +7,16 @@ use App\Models\PriceObservation;
 use App\Models\ScrapedOffer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class OfferDetailController extends Controller
 {
     private const HISTORY_MATCH_CONFIDENCE = 90;
+
+    private const RECOMMENDATION_MATCH_CONFIDENCE = 90;
 
     /**
      * @var list<string>
@@ -30,12 +34,35 @@ class OfferDetailController extends Controller
 
         return Inertia::render('Offers/Show', [
             'product' => $this->productPayload($scrapedOffer),
+            'currentProductPrices' => $this->currentProductPrices($scrapedOffer),
             'recommendations' => $this->recommendations($scrapedOffer),
         ]);
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{
+     *     store: string|null,
+     *     name: string,
+     *     description: string|null,
+     *     fullDescription: string|null,
+     *     imageUrl: string|null,
+     *     currentOffer: array{
+     *         price: string|null,
+     *         unitPrice: string|null,
+     *         normalPrice: null,
+     *         validUntil: string|null
+     *     },
+     *     nutrition: list<array{
+     *         label: string,
+     *         value: string,
+     *         subItems?: list<array{label: string, value: string}>
+     *     }>,
+     *     history: list<array{
+     *         grocer: string,
+     *         color: string,
+     *         prices: list<array{date: string, price: float}>
+     *     }>
+     * }
      */
     private function productPayload(ScrapedOffer $offer): array
     {
@@ -43,6 +70,7 @@ class OfferDetailController extends Controller
             'store' => $offer->grocer?->name,
             'name' => $offer->title,
             'description' => $this->description($offer),
+            'fullDescription' => $this->fullDescription($offer),
             'imageUrl' => $offer->image_url ?: $offer->grocerProduct?->image_url ?: $offer->productMatch?->canonicalProduct?->image_url,
             'currentOffer' => [
                 'price' => $this->formatPrice($offer->price),
@@ -56,6 +84,13 @@ class OfferDetailController extends Controller
     }
 
     private function description(ScrapedOffer $offer): ?string
+    {
+        $description = $this->fullDescription($offer);
+
+        return $description === null ? null : Str::limit($description, 180, preserveWords: true);
+    }
+
+    private function fullDescription(ScrapedOffer $offer): ?string
     {
         return collect([
             $this->formatOfferAmount($offer),
@@ -178,48 +213,200 @@ class OfferDetailController extends Controller
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return list<array{
+     *     id: string,
+     *     store: string,
+     *     price: string,
+     *     unitPrice: string|null,
+     *     validUntil: string|null,
+     *     isCurrent: bool
+     * }>
+     */
+    private function currentProductPrices(ScrapedOffer $offer): array
+    {
+        $sameProductIds = $this->sameProductOfferIds($offer);
+
+        if ($sameProductIds->isEmpty()) {
+            return [];
+        }
+
+        return $this->baseRecommendationQuery(collect())
+            ->whereKey($sameProductIds->all())
+            ->orderBy('price')
+            ->orderBy('title')
+            ->get()
+            ->groupBy('grocer_id')
+            ->map(fn (Collection $offers): ScrapedOffer => $offers->sortBy([
+                ['price', 'asc'],
+                ['title', 'asc'],
+            ])->first())
+            ->sortBy([
+                ['price', 'asc'],
+                ['title', 'asc'],
+            ])
+            ->map(fn (ScrapedOffer $currentOffer): array => [
+                'id' => $currentOffer->id,
+                'store' => $currentOffer->grocer?->name ?: 'Butik',
+                'price' => $this->formatPrice($currentOffer->price),
+                'unitPrice' => $this->formatUnitPrice($currentOffer),
+                'validUntil' => $currentOffer->paper?->active_until?->locale('da')->translatedFormat('l \\d. j. F'),
+                'isCurrent' => $currentOffer->is($offer),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<array{
+     *     id: string,
+     *     brand: string,
+     *     name: string,
+     *     store: string|null,
+     *     weight: string,
+     *     price: string,
+     *     imageUrl: string|null
+     * }>
      */
     private function recommendations(ScrapedOffer $offer): array
     {
-        $terms = collect(preg_split('/\s+/u', mb_strtolower($offer->title)) ?: [])
-            ->map(fn (string $term): string => trim($term, ' ,.-_()[]{}'))
-            ->filter(fn (string $term): bool => mb_strlen($term) >= 4)
-            ->take(3)
-            ->values();
+        $recommendations = collect();
+        $excludedIds = collect([$offer->id])->merge($this->sameProductOfferIds($offer));
+        $remaining = 4;
 
+        if ($remaining > 0 && filled($offer->grocerProduct?->category)) {
+            $matches = $this->baseRecommendationQuery($excludedIds)
+                ->whereHas('grocerProduct', function (Builder $query) use ($offer): void {
+                    $query->where('category', $offer->grocerProduct?->category);
+
+                    if (filled($offer->grocerProduct?->subcategory)) {
+                        $query->where('subcategory', $offer->grocerProduct?->subcategory);
+                    }
+                })
+                ->latest()
+                ->limit($remaining)
+                ->get();
+
+            $recommendations = $recommendations->merge($matches);
+            $excludedIds = $excludedIds->merge($matches->pluck('id'));
+            $remaining = 4 - $recommendations->count();
+        }
+
+        if ($remaining > 0) {
+            $terms = $this->recommendationTerms($offer->title);
+            $titleLikeOperator = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+
+            $matches = $this->baseRecommendationQuery($excludedIds)
+                ->where(function (Builder $query) use ($terms, $offer, $titleLikeOperator): void {
+                    if ($terms->isEmpty()) {
+                        $query->where('title', $titleLikeOperator, mb_substr($offer->title, 0, 8).'%');
+
+                        return;
+                    }
+
+                    $terms->each(fn (string $term) => $query->orWhere('title', $titleLikeOperator, '%'.$term.'%'));
+                })
+                ->latest()
+                ->limit($remaining)
+                ->get();
+
+            $recommendations = $recommendations->merge($matches);
+        }
+
+        return $recommendations
+            ->take(4)
+            ->map(fn (ScrapedOffer $recommendation): array => $this->offerCard($recommendation))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    private function sameProductOfferIds(ScrapedOffer $offer): Collection
+    {
+        $canonicalProductId = $this->trustedCanonicalProductId($offer);
+
+        if ($canonicalProductId === null) {
+            return collect();
+        }
+
+        return $this->baseRecommendationQuery(collect())
+            ->whereHas('productMatch', fn (Builder $query) => $query
+                ->where('status', 'matched')
+                ->where('confidence', '>=', self::RECOMMENDATION_MATCH_CONFIDENCE)
+                ->where('canonical_product_id', $canonicalProductId))
+            ->orderBy('price')
+            ->orderBy('title')
+            ->pluck('id');
+    }
+
+    private function trustedCanonicalProductId(ScrapedOffer $offer): ?string
+    {
+        return $offer->productMatch?->status === 'matched'
+            && $offer->productMatch->confidence >= self::RECOMMENDATION_MATCH_CONFIDENCE
+                ? $offer->productMatch->canonical_product_id
+                : null;
+    }
+
+    /**
+     * @return array{
+     *     id: string,
+     *     brand: string,
+     *     name: string,
+     *     store: string|null,
+     *     weight: string,
+     *     price: string,
+     *     imageUrl: string|null
+     * }
+     */
+    private function offerCard(ScrapedOffer $offer): array
+    {
+        return [
+            'id' => $offer->id,
+            'brand' => mb_substr($offer->title, 0, 10),
+            'name' => $offer->title,
+            'store' => $offer->grocer?->name,
+            'weight' => $this->formatOfferAmount($offer) ?: 'Ukendt mængde',
+            'price' => $this->formatPrice($offer->price),
+            'imageUrl' => $offer->image_url ?: $offer->grocerProduct?->image_url,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, string>  $excludedIds
+     * @return Builder<ScrapedOffer>
+     */
+    private function baseRecommendationQuery(Collection $excludedIds): Builder
+    {
         return ScrapedOffer::query()
-            ->select(['id', 'paper_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit'])
-            ->with('paper:id,active_from,active_until')
-            ->whereKeyNot($offer->id)
+            ->select(['id', 'grocer_id', 'grocer_product_id', 'paper_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit', 'unit_price', 'compare_unit'])
+            ->with([
+                'grocer:id,name',
+                'grocerProduct:id,image_url,category,subcategory',
+                'paper:id,active_from,active_until',
+                'productMatch:id,scraped_offer_id,canonical_product_id,status,confidence',
+            ])
+            ->whereKeyNot($excludedIds->all())
             ->whereNotNull('price')
             ->whereHas('paper', function (Builder $query): void {
                 $query
                     ->where('active_from', '<=', now())
                     ->where('active_until', '>=', now());
-            })
-            ->where(function (Builder $query) use ($terms, $offer): void {
-                if ($terms->isEmpty()) {
-                    $query->where('title', 'ilike', mb_substr($offer->title, 0, 8).'%');
+            });
+    }
 
-                    return;
-                }
+    /**
+     * @return Collection<int, string>
+     */
+    private function recommendationTerms(string $title): Collection
+    {
+        $stopWords = ['cream', 'sour', 'sweet', 'salted', 'classic', 'original', 'tilbud', 'gram', 'liter'];
 
-                $terms->each(fn (string $term) => $query->orWhere('title', 'ilike', '%'.$term.'%'));
-            })
-            ->latest()
-            ->limit(4)
-            ->get()
-            ->map(fn (ScrapedOffer $recommendation): array => [
-                'id' => $recommendation->id,
-                'brand' => mb_substr($recommendation->title, 0, 10),
-                'name' => $recommendation->title,
-                'weight' => $this->formatOfferAmount($recommendation) ?: 'Ukendt mængde',
-                'price' => $this->formatPrice($recommendation->price),
-                'imageUrl' => $recommendation->image_url,
-            ])
-            ->values()
-            ->all();
+        return collect(preg_split('/\s+/u', mb_strtolower($title)) ?: [])
+            ->map(fn (string $term): string => trim($term, ' ,.-_()[]{}'))
+            ->filter(fn (string $term): bool => mb_strlen($term) >= 4 && ! in_array($term, $stopWords, true))
+            ->take(3)
+            ->values();
     }
 
     private function formatOfferAmount(ScrapedOffer $offer): ?string

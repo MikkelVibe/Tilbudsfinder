@@ -1,13 +1,28 @@
 <?php
 
-namespace App\Http\Requests\Api\V1;
+namespace App\Http\Requests;
 
 use Brick\Math\BigDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class SearchOffersRequest extends FormRequest
+class OfferSearchPageRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        $grocers = $this->query('grocers');
+
+        if (is_string($grocers)) {
+            $this->merge([
+                'grocers' => collect(explode(',', $grocers))
+                    ->map(static fn (string $slug): string => trim($slug))
+                    ->filter()
+                    ->values()
+                    ->all(),
+            ]);
+        }
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -22,11 +37,12 @@ class SearchOffersRequest extends FormRequest
     {
         return [
             'q' => ['nullable', 'string', 'max:120'],
-            'grocers' => ['nullable', 'string', 'max:1000'],
+            'grocers' => ['nullable', 'array'],
+            'grocers.*' => ['string', 'max:120'],
             'sort' => ['nullable', Rule::in(['relevance', 'price_asc', 'price_desc', 'unit_price_asc', 'name_asc', 'name_desc'])],
             'price_min' => ['nullable', 'numeric', 'min:0'],
             'price_max' => ['nullable', 'numeric', 'min:0', 'gte:price_min'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1'],
         ];
     }
 
@@ -35,15 +51,9 @@ class SearchOffersRequest extends FormRequest
      */
     public function grocerSlugs(): array
     {
-        $grocers = $this->validated('grocers');
-
-        if (! is_string($grocers) || trim($grocers) === '') {
-            return [];
-        }
-
-        return collect(explode(',', $grocers))
+        return collect($this->validated('grocers', []))
+            ->filter(static fn (mixed $slug): bool => is_string($slug) && trim($slug) !== '')
             ->map(static fn (string $slug): string => trim($slug))
-            ->filter(static fn (string $slug): bool => $slug !== '')
             ->unique()
             ->values()
             ->all();
@@ -67,13 +77,6 @@ class SearchOffersRequest extends FormRequest
         $sort = $this->validated('sort');
 
         return is_string($sort) ? $sort : 'relevance';
-    }
-
-    public function perPage(): int
-    {
-        $perPage = $this->validated('per_page');
-
-        return is_numeric($perPage) ? (int) $perPage : 24;
     }
 
     public function priceMin(): ?BigDecimal

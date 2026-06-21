@@ -1,9 +1,9 @@
 <script setup>
 import { Link } from '@inertiajs/vue3';
-import { reactive } from 'vue';
+import { reactive, ref } from 'vue';
 import SiteHeader from '../Components/SiteHeader.vue';
 
-defineProps({
+const props = defineProps({
     popularOffers: {
         type: Array,
         default: () => [],
@@ -16,13 +16,34 @@ defineProps({
         type: Array,
         default: () => [],
     },
+    allStoreSlugs: {
+        type: Array,
+        default: () => [],
+    },
+    enabledStoreCount: {
+        type: Number,
+        default: 0,
+    },
 });
 
 const quickSearches = ['mælk', 'kaffe', 'kylling', 'smør', 'pasta'];
 const loadedImages = reactive({});
+const searchQuery = ref('');
 
 function markImageLoaded(key) {
     loadedImages[key] = true;
+}
+
+function searchHref(term) {
+    return `/tilbud?q=${encodeURIComponent(term)}`;
+}
+
+function storeHref(store) {
+    return `/tilbud?grocers[]=${encodeURIComponent(store.slug)}`;
+}
+
+function allStoresHref() {
+    return '/butikker';
 }
 </script>
 
@@ -46,7 +67,7 @@ function markImageLoaded(key) {
                         </p>
                     </div>
 
-                    <div class="mt-8">
+                    <form class="mt-8" action="/tilbud" method="get">
                         <label for="offer-search" class="sr-only">Søg efter varer</label>
                         <div class="relative flex items-center gap-2 border-2 border-[#173124] bg-white p-1.5">
                             <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#173124]" aria-hidden="true">
@@ -57,25 +78,28 @@ function markImageLoaded(key) {
                             </span>
                             <input
                                 id="offer-search"
+                                v-model="searchQuery"
+                                name="q"
                                 type="search"
                                 placeholder="Søg efter varer"
                                 class="min-w-0 flex-1 bg-transparent py-3 pl-11 pr-2 text-lg font-semibold text-[#18251e] outline-none placeholder:text-[#8a8f88]"
                             >
-                            <button class="hidden self-stretch bg-[#173124] px-6 text-sm font-extrabold uppercase tracking-[0.18em] text-[#fbf9f4] transition hover:bg-[#0f241a] sm:block">
+                            <button type="submit" class="hidden self-stretch bg-[#173124] px-6 text-sm font-extrabold uppercase tracking-[0.18em] text-[#fbf9f4] transition hover:bg-[#0f241a] sm:block">
                                 Søg
                             </button>
                         </div>
 
                         <div class="mt-4 flex flex-wrap gap-2">
-                            <button
+                            <Link
                                 v-for="term in quickSearches"
                                 :key="term"
+                                :href="searchHref(term)"
                                 class="border border-[#c9c1b4] bg-[#f5f3ee] px-3 py-1.5 text-sm font-bold text-[#173124] transition hover:border-[#173124] hover:bg-white"
                             >
                                 {{ term }}
-                            </button>
+                            </Link>
                         </div>
-                    </div>
+                    </form>
                 </div>
 
                 <section class="mt-12">
@@ -189,24 +213,28 @@ function markImageLoaded(key) {
                     </div>
 
                     <div class="divide-y divide-[#c9c1b4] border-b border-[#c9c1b4]">
-                        <button
+                        <Link
                             v-for="store in stores"
-                            :key="store.name"
-                            type="button"
+                            :key="store.slug"
+                            :href="storeHref(store)"
+                            prefetch
                             class="flex w-full items-center justify-between gap-4 py-3 text-left text-sm font-bold transition hover:text-[#b3261e]"
                         >
                             <span>{{ store.name }}</span>
                             <span class="text-xs font-extrabold uppercase tracking-[0.12em] text-[#6f746d]">{{ store.count }}</span>
-                        </button>
+                        </Link>
                         <div v-if="!stores.length" class="py-5 text-sm font-semibold text-[#6f746d]">
                             Ingen butikker med aktive tilbud endnu.
                         </div>
                     </div>
 
-                    <button type="button" class="mt-4 inline-flex items-center gap-2 text-sm font-extrabold uppercase tracking-[0.18em] text-[#173124] hover:text-[#b3261e]">
-                        Se alle 12 kæder
-                        <span aria-hidden="true">→</span>
-                    </button>
+                    <Link :href="allStoresHref()" prefetch class="mt-4 inline-flex items-center gap-2 text-sm font-extrabold uppercase tracking-[0.18em] text-[#173124] hover:text-[#b3261e]">
+                        Se alle {{ enabledStoreCount }} kæder
+                        <svg class="size-3 translate-y-px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+                            <path d="M3 8h9" />
+                            <path d="m9 5 3 3-3 3" />
+                        </svg>
+                    </Link>
                 </section>
 
                 <section class="border-2 border-[#173124] bg-[#f5f3ee] p-5">
