@@ -43,11 +43,7 @@ function storeHref(store) {
 }
 
 function allStoresHref() {
-    if (!props.allStoreSlugs.length) {
-        return '/tilbud';
-    }
-
-    return `/tilbud?grocers=${props.allStoreSlugs.map((slug) => encodeURIComponent(slug)).join(',')}`;
+    return '/butikker';
 }
 </script>
 

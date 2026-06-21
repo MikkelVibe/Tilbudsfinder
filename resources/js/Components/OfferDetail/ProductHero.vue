@@ -29,17 +29,12 @@ const titleParts = computed(() => String(props.product.name || '').split('&'));
 
             <div class="min-h-0 flex-1 py-6 text-center sm:text-left">
                 <p class="mb-3 text-[10px] font-black uppercase tracking-[0.28em] text-[#6f746d]">Tilbud</p>
-                <h1 class="font-serif text-4xl font-bold leading-[0.92] text-[#18251e] sm:text-5xl">
+                <h1 class="max-w-full break-words font-serif text-3xl font-bold leading-[0.98] text-[#18251e] [overflow-wrap:anywhere] sm:text-4xl xl:text-[2.65rem]">
                     <template v-for="(part, index) in titleParts" :key="`${part}-${index}`">
                         <span>{{ part }}</span>
                         <span v-if="index < titleParts.length - 1" class="font-sans text-[0.78em] font-black tracking-normal">&amp;</span>
                     </template>
                 </h1>
-                <div v-if="product.description" class="mt-4 overflow-hidden">
-                    <p class="line-clamp-6 text-sm italic leading-6 text-[#4a4a4a]">
-                        {{ product.description }}
-                    </p>
-                </div>
             </div>
 
             <div class="mt-auto divide-y divide-[#d8d0c3] border-y border-[#d8d0c3] bg-[#fbf9f4]">
