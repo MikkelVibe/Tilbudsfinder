@@ -121,9 +121,44 @@ class MeilisearchOfferSearchEngine implements OfferSearchEngine
             'primaryKey' => 'id',
         ]);
 
-        if (! $response->successful() && ! $this->isIndexAlreadyCreatedResponse($response->status(), $response->json())) {
+        $body = $response->json();
+
+        if (! $response->successful() && ! $this->isIndexAlreadyCreatedResponse($response->status(), is_array($body) ? $body : null)) {
             throw new RuntimeException('Meilisearch index creation failed with status '.$response->status());
         }
+
+        if ($response->status() === 202) {
+            $this->waitForTask($response->json('taskUid'));
+        }
+    }
+
+    private function waitForTask(mixed $taskUid): void
+    {
+        if (! is_int($taskUid) && ! is_string($taskUid)) {
+            throw new RuntimeException('Meilisearch index creation did not return a taskUid.');
+        }
+
+        for ($attempt = 0; $attempt < 30; $attempt++) {
+            $response = $this->request()->get($this->url('/tasks/'.$taskUid));
+
+            if (! $response->successful()) {
+                throw new RuntimeException('Meilisearch task polling failed with status '.$response->status());
+            }
+
+            $status = $response->json('status');
+
+            if ($status === 'succeeded') {
+                return;
+            }
+
+            if ($status === 'failed' || $status === 'canceled') {
+                throw new RuntimeException('Meilisearch index creation task '.$status.'.');
+            }
+
+            usleep(100_000);
+        }
+
+        throw new RuntimeException('Meilisearch index creation task timed out.');
     }
 
     /**

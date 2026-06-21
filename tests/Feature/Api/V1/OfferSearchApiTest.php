@@ -92,11 +92,14 @@ class OfferSearchApiTest extends TestCase
             ->assertJsonValidationErrors('price_max');
     }
 
-    public function test_it_uses_grouped_database_search_even_when_meilisearch_is_configured(): void
+    public function test_it_falls_back_to_grouped_database_search_when_configured_meilisearch_fails(): void
     {
         Config::set('search.driver', 'meilisearch');
         Config::set('search.meilisearch.host', 'http://meili.test');
         Http::preventStrayRequests();
+        Http::fake([
+            'http://meili.test/indexes/offers/search' => Http::response(['message' => 'Index missing'], 404),
+        ]);
 
         $canonicalProduct = CanonicalProduct::factory()->create([
             'name' => 'Premier Is Astronaut 6 x 50 ml',
@@ -112,7 +115,7 @@ class OfferSearchApiTest extends TestCase
             ->assertJsonPath('data.0.price', '20.00')
             ->assertJsonPath('data.0.product_offer_count', 2);
 
-        Http::assertNothingSent();
+        Http::assertSentCount(1);
     }
 
     public function test_it_excludes_expired_offers(): void

@@ -39,7 +39,29 @@ class OfferDetailController extends Controller
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{
+     *     store: string|null,
+     *     name: string,
+     *     description: string|null,
+     *     fullDescription: string|null,
+     *     imageUrl: string|null,
+     *     currentOffer: array{
+     *         price: string,
+     *         unitPrice: string|null,
+     *         normalPrice: null,
+     *         validUntil: string|null
+     *     },
+     *     nutrition: list<array{
+     *         label: string,
+     *         value: string,
+     *         subItems?: list<array{label: string, value: string}>
+     *     }>,
+     *     history: list<array{
+     *         grocer: string,
+     *         color: string,
+     *         prices: list<array{date: string, price: float}>
+     *     }>
+     * }
      */
     private function productPayload(ScrapedOffer $offer): array
     {

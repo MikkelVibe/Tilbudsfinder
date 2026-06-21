@@ -4,9 +4,15 @@ namespace App\Search;
 
 use Brick\Math\BigDecimal;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use RuntimeException;
 
 class OfferSearch
 {
+    public function __construct(
+        private readonly OfferSearchEngine $engine,
+        private readonly DatabaseOfferSearchEngine $database,
+    ) {}
+
     /**
      * @param  list<string>  $grocerSlugs
      */
@@ -20,6 +26,14 @@ class OfferSearch
     ): LengthAwarePaginator {
         $searchQuery = new OfferSearchQuery($query, $grocerSlugs, $sort, $perPage, $priceMin, $priceMax);
 
-        return app(DatabaseOfferSearchEngine::class)->search($searchQuery);
+        try {
+            return $this->engine->search($searchQuery);
+        } catch (RuntimeException $exception) {
+            if (! config('search.fallback_to_database', true) || $this->engine instanceof DatabaseOfferSearchEngine) {
+                throw $exception;
+            }
+
+            return $this->database->search($searchQuery);
+        }
     }
 }

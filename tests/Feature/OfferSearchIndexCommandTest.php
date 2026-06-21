@@ -25,9 +25,17 @@ class OfferSearchIndexCommandTest extends TestCase
     {
         Config::set('search.meilisearch.host', 'http://meili.test');
         Http::preventStrayRequests();
-        Http::fake([
-            'http://meili.test/*' => Http::response(['taskUid' => 1]),
-        ]);
+        Http::fake(function (Request $request) {
+            if ($request->method() === 'POST' && $request->url() === 'http://meili.test/indexes') {
+                return Http::response(['taskUid' => 1], 202);
+            }
+
+            if ($request->method() === 'GET' && $request->url() === 'http://meili.test/tasks/1') {
+                return Http::response(['status' => 'succeeded']);
+            }
+
+            return Http::response(['taskUid' => 2]);
+        });
 
         $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
         $this->offer($grocer, 'Arla Letmælk', 12.00);
@@ -38,6 +46,9 @@ class OfferSearchIndexCommandTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->method() === 'PATCH'
             && $request->url() === 'http://meili.test/indexes/offers/settings'
             && $request['searchableAttributes'][0] === 'canonical_product_name');
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
+            && $request->url() === 'http://meili.test/tasks/1');
 
         Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE'
             && $request->url() === 'http://meili.test/indexes/offers/documents');
@@ -52,11 +63,58 @@ class OfferSearchIndexCommandTest extends TestCase
     {
         Config::set('search.meilisearch.host', 'http://meili.test');
         Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->method() === 'POST' && $request->url() === 'http://meili.test/indexes') {
+                return Http::response([
+                    'message' => 'Index `offers` already exists.',
+                    'code' => 'index_already_exists',
+                ], 400);
+            }
+
+            return Http::response(['taskUid' => 2]);
+        });
+
+        $this->artisan('offers:sync-search-index --settings --chunk=1')
+            ->assertSuccessful();
+    }
+
+    public function test_it_waits_for_meilisearch_index_creation_before_syncing_settings(): void
+    {
+        Config::set('search.meilisearch.host', 'http://meili.test');
+        Http::preventStrayRequests();
+        Http::fakeSequence()
+            ->push(['taskUid' => 123], 202)
+            ->push(['status' => 'enqueued'])
+            ->push(['status' => 'processing'])
+            ->push(['status' => 'succeeded'])
+            ->push(['taskUid' => 456]);
+
+        $this->artisan('offers:sync-search-index --settings --chunk=1')
+            ->assertSuccessful();
+
+        $sentUrls = collect(Http::recorded())
+            ->map(fn (array $record): string => $record[0]->method().' '.$record[0]->url())
+            ->values()
+            ->all();
+
+        $this->assertSame([
+            'POST http://meili.test/indexes',
+            'GET http://meili.test/tasks/123',
+            'GET http://meili.test/tasks/123',
+            'GET http://meili.test/tasks/123',
+            'PATCH http://meili.test/indexes/offers/settings',
+        ], $sentUrls);
+    }
+
+    public function test_it_treats_existing_meilisearch_index_conflict_as_success(): void
+    {
+        Config::set('search.meilisearch.host', 'http://meili.test');
+        Http::preventStrayRequests();
         Http::fake([
             'http://meili.test/indexes' => Http::response([
                 'message' => 'Index `offers` already exists.',
                 'code' => 'index_already_exists',
-            ], 400),
+            ], 409),
             'http://meili.test/indexes/offers/settings' => Http::response(['taskUid' => 2]),
         ]);
 
