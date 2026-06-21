@@ -85,6 +85,13 @@ class OfferSearchApiTest extends TestCase
             ->assertJsonPath('data.0.title', 'Billig literpris');
     }
 
+    public function test_it_rejects_inverted_price_ranges(): void
+    {
+        $this->getJson('/api/v1/offers/search?price_min=50&price_max=10')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('price_max');
+    }
+
     public function test_it_uses_grouped_database_search_even_when_meilisearch_is_configured(): void
     {
         Config::set('search.driver', 'meilisearch');

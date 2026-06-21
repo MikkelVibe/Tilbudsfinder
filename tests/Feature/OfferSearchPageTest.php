@@ -81,6 +81,51 @@ class OfferSearchPageTest extends TestCase
                 ->etc());
     }
 
+    public function test_it_keeps_canonical_and_unmatched_results_in_separate_groups_when_ids_overlap(): void
+    {
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
+        $unmatched = $this->offer($grocer, 'Unmatched result', 25.00);
+        $canonicalProduct = CanonicalProduct::factory()->create([
+            'id' => $unmatched->scraped_offer_id,
+            'name' => 'Shared numeric id product',
+        ]);
+
+        $this->offer($grocer, 'Canonical result', 20.00, canonicalProduct: $canonicalProduct);
+
+        $this->get('/tilbud?sort=price_asc')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Offers/Index', false)
+                ->has('results.data', 2)
+                ->where('results.data.0.title', 'Shared numeric id product')
+                ->where('results.data.1.title', 'Unmatched result')
+                ->etc());
+    }
+
+    public function test_grocer_filter_counts_match_grouped_search_results(): void
+    {
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
+        $canonicalProduct = CanonicalProduct::factory()->create(['name' => 'Grouped milk']);
+
+        $this->offer($grocer, 'Milk one', 10.00, canonicalProduct: $canonicalProduct);
+        $this->offer($grocer, 'Milk two', 12.00, canonicalProduct: $canonicalProduct);
+
+        $this->get('/tilbud?grocers[]=rema1000')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Offers/Index', false)
+                ->where('grocers.0.count', 1)
+                ->where('results.meta.total', 1)
+                ->etc());
+    }
+
+    public function test_it_rejects_inverted_price_ranges(): void
+    {
+        $this->get('/tilbud?price_min=50&price_max=10')
+            ->assertRedirect()
+            ->assertSessionHasErrors('price_max');
+    }
+
     public function test_it_sorts_canonical_product_results_by_displayed_name(): void
     {
         $grocer = Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);

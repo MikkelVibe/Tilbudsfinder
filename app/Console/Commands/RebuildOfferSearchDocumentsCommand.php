@@ -21,7 +21,7 @@ class RebuildOfferSearchDocumentsCommand extends Command
         ScrapedOffer::query()
             ->with(['grocer', 'paper', 'grocerProduct', 'productMatch.canonicalProduct'])
             ->orderBy('id')
-            ->chunk($chunkSize, function ($offers) use ($builder, &$count): void {
+            ->chunkById($chunkSize, function ($offers) use ($builder, &$count): void {
                 foreach ($offers as $offer) {
                     $builder->updateForOffer($offer);
                     $count++;

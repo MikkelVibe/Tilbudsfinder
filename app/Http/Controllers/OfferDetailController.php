@@ -190,7 +190,14 @@ class OfferDetailController extends Controller
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return list<array{
+     *     id: string,
+     *     store: string,
+     *     price: string,
+     *     unitPrice: string|null,
+     *     validUntil: string|null,
+     *     isCurrent: bool
+     * }>
      */
     private function currentProductPrices(ScrapedOffer $offer): array
     {
@@ -200,7 +207,7 @@ class OfferDetailController extends Controller
             return [];
         }
 
-        return $this->baseRecommendationQuery($offer, collect())
+        return $this->baseRecommendationQuery(collect())
             ->whereKey($sameProductIds->all())
             ->orderBy('price')
             ->orderBy('title')
@@ -227,7 +234,15 @@ class OfferDetailController extends Controller
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return list<array{
+     *     id: string,
+     *     brand: string,
+     *     name: string,
+     *     store: string|null,
+     *     weight: string,
+     *     price: string,
+     *     imageUrl: string|null
+     * }>
      */
     private function recommendations(ScrapedOffer $offer): array
     {
@@ -236,7 +251,7 @@ class OfferDetailController extends Controller
         $remaining = 4;
 
         if ($remaining > 0 && filled($offer->grocerProduct?->category)) {
-            $matches = $this->baseRecommendationQuery($offer, $excludedIds)
+            $matches = $this->baseRecommendationQuery($excludedIds)
                 ->whereHas('grocerProduct', function (Builder $query) use ($offer): void {
                     $query->where('category', $offer->grocerProduct?->category);
 
@@ -256,7 +271,7 @@ class OfferDetailController extends Controller
         if ($remaining > 0) {
             $terms = $this->recommendationTerms($offer->title);
 
-            $matches = $this->baseRecommendationQuery($offer, $excludedIds)
+            $matches = $this->baseRecommendationQuery($excludedIds)
                 ->where(function (Builder $query) use ($terms, $offer): void {
                     if ($terms->isEmpty()) {
                         $query->where('title', 'ilike', mb_substr($offer->title, 0, 8).'%');
@@ -291,7 +306,7 @@ class OfferDetailController extends Controller
             return collect();
         }
 
-        return $this->baseRecommendationQuery($offer, collect())
+        return $this->baseRecommendationQuery(collect())
             ->whereHas('productMatch', fn (Builder $query) => $query
                 ->where('status', 'matched')
                 ->where('confidence', '>=', self::RECOMMENDATION_MATCH_CONFIDENCE)
@@ -310,7 +325,15 @@ class OfferDetailController extends Controller
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{
+     *     id: string,
+     *     brand: string,
+     *     name: string,
+     *     store: string|null,
+     *     weight: string,
+     *     price: string,
+     *     imageUrl: string|null
+     * }
      */
     private function offerCard(ScrapedOffer $offer): array
     {
@@ -329,7 +352,7 @@ class OfferDetailController extends Controller
      * @param  Collection<int, string>  $excludedIds
      * @return Builder<ScrapedOffer>
      */
-    private function baseRecommendationQuery(ScrapedOffer $offer, Collection $excludedIds): Builder
+    private function baseRecommendationQuery(Collection $excludedIds): Builder
     {
         return ScrapedOffer::query()
             ->select(['id', 'grocer_id', 'grocer_product_id', 'paper_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit', 'unit_price', 'compare_unit'])

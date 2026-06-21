@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\V1;
 
+use Brick\Math\BigDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -24,7 +25,7 @@ class SearchOffersRequest extends FormRequest
             'grocers' => ['nullable', 'string', 'max:1000'],
             'sort' => ['nullable', Rule::in(['relevance', 'price_asc', 'price_desc', 'unit_price_asc', 'name_asc', 'name_desc'])],
             'price_min' => ['nullable', 'numeric', 'min:0'],
-            'price_max' => ['nullable', 'numeric', 'min:0'],
+            'price_max' => ['nullable', 'numeric', 'min:0', 'gte:price_min'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }
@@ -75,17 +76,17 @@ class SearchOffersRequest extends FormRequest
         return is_numeric($perPage) ? (int) $perPage : 24;
     }
 
-    public function priceMin(): ?float
+    public function priceMin(): ?BigDecimal
     {
         $price = $this->validated('price_min');
 
-        return is_numeric($price) ? (float) $price : null;
+        return is_numeric($price) ? BigDecimal::of((string) $price) : null;
     }
 
-    public function priceMax(): ?float
+    public function priceMax(): ?BigDecimal
     {
         $price = $this->validated('price_max');
 
-        return is_numeric($price) ? (float) $price : null;
+        return is_numeric($price) ? BigDecimal::of((string) $price) : null;
     }
 }

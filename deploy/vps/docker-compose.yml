@@ -51,7 +51,7 @@ services:
       - redis-data:/data
 
   meilisearch:
-    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:latest}
+    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.47.0}
     restart: unless-stopped
     env_file:
       - .env

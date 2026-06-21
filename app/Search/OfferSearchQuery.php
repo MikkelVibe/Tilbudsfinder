@@ -2,6 +2,8 @@
 
 namespace App\Search;
 
+use Brick\Math\BigDecimal;
+
 final readonly class OfferSearchQuery
 {
     /**
@@ -12,7 +14,7 @@ final readonly class OfferSearchQuery
         public array $grocerSlugs,
         public string $sort,
         public int $perPage,
-        public ?float $priceMin = null,
-        public ?float $priceMax = null,
+        public ?BigDecimal $priceMin = null,
+        public ?BigDecimal $priceMax = null,
     ) {}
 }

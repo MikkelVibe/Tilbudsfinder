@@ -48,6 +48,22 @@ class OfferSearchIndexCommandTest extends TestCase
             && $request[0]['grocer_slug'] === 'rema1000');
     }
 
+    public function test_it_treats_existing_meilisearch_index_as_success(): void
+    {
+        Config::set('search.meilisearch.host', 'http://meili.test');
+        Http::preventStrayRequests();
+        Http::fake([
+            'http://meili.test/indexes' => Http::response([
+                'message' => 'Index `offers` already exists.',
+                'code' => 'index_already_exists',
+            ], 400),
+            'http://meili.test/indexes/offers/settings' => Http::response(['taskUid' => 2]),
+        ]);
+
+        $this->artisan('offers:sync-search-index --settings --chunk=1')
+            ->assertSuccessful();
+    }
+
     public function test_it_rebuilds_search_documents_from_existing_scraped_offers(): void
     {
         $grocer = Grocer::factory()->create(['slug' => 'rema1000']);

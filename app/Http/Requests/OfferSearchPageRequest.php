@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Brick\Math\BigDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -40,7 +41,7 @@ class OfferSearchPageRequest extends FormRequest
             'grocers.*' => ['string', 'max:120'],
             'sort' => ['nullable', Rule::in(['relevance', 'price_asc', 'price_desc', 'unit_price_asc', 'name_asc', 'name_desc'])],
             'price_min' => ['nullable', 'numeric', 'min:0'],
-            'price_max' => ['nullable', 'numeric', 'min:0'],
+            'price_max' => ['nullable', 'numeric', 'min:0', 'gte:price_min'],
             'page' => ['nullable', 'integer', 'min:1'],
         ];
     }
@@ -78,17 +79,17 @@ class OfferSearchPageRequest extends FormRequest
         return is_string($sort) ? $sort : 'relevance';
     }
 
-    public function priceMin(): ?float
+    public function priceMin(): ?BigDecimal
     {
         $price = $this->validated('price_min');
 
-        return is_numeric($price) ? (float) $price : null;
+        return is_numeric($price) ? BigDecimal::of((string) $price) : null;
     }
 
-    public function priceMax(): ?float
+    public function priceMax(): ?BigDecimal
     {
         $price = $this->validated('price_max');
 
-        return is_numeric($price) ? (float) $price : null;
+        return is_numeric($price) ? BigDecimal::of((string) $price) : null;
     }
 }

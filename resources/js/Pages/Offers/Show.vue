@@ -1,6 +1,6 @@
 <script setup>
 import { Link } from '@inertiajs/vue3';
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import OfferClipping from '../../Components/OfferDetail/OfferClipping.vue';
 import NutritionTable from '../../Components/OfferDetail/NutritionTable.vue';
 import PriceHistoryGraph from '../../Components/OfferDetail/PriceHistoryGraph.vue';
@@ -42,7 +42,15 @@ async function measureDescriptionOverflow() {
     }
 }
 
-onMounted(measureDescriptionOverflow);
+onMounted(() => {
+    measureDescriptionOverflow();
+    window.addEventListener('resize', measureDescriptionOverflow);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('resize', measureDescriptionOverflow);
+});
+
 watch(() => props.product.fullDescription, measureDescriptionOverflow);
 </script>
 
@@ -68,6 +76,7 @@ watch(() => props.product.fullDescription, measureDescriptionOverflow);
 
                 <article class="bg-[#f5f3ee]">
                     <div
+                        id="product-description"
                         ref="descriptionBody"
                         :class="[
                             'relative overflow-hidden px-5 py-5 sm:px-6',
@@ -87,6 +96,8 @@ watch(() => props.product.fullDescription, measureDescriptionOverflow);
                     <div v-if="descriptionCanExpand" class="flex justify-center border-t border-[#d8d0c3] px-5 py-3">
                         <button
                             type="button"
+                            aria-controls="product-description"
+                            :aria-expanded="descriptionExpanded"
                             class="inline-flex min-h-10 items-center justify-center border-2 border-[#173124] bg-[#173124] px-5 text-xs font-black uppercase tracking-[0.18em] text-[#fbf9f4] transition hover:bg-[#fbf9f4] hover:text-[#173124]"
                             @click="descriptionExpanded = !descriptionExpanded"
                         >

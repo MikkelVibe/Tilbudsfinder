@@ -39,7 +39,7 @@ function searchHref(term) {
 }
 
 function storeHref(store) {
-    return `/tilbud?grocers=${encodeURIComponent(store.slug)}`;
+    return `/tilbud?grocers[]=${encodeURIComponent(store.slug)}`;
 }
 
 function allStoresHref() {
@@ -215,7 +215,7 @@ function allStoresHref() {
                     <div class="divide-y divide-[#c9c1b4] border-b border-[#c9c1b4]">
                         <Link
                             v-for="store in stores"
-                            :key="store.name"
+                            :key="store.slug"
                             :href="storeHref(store)"
                             prefetch
                             class="flex w-full items-center justify-between gap-4 py-3 text-left text-sm font-bold transition hover:text-[#b3261e]"

@@ -7,6 +7,7 @@ use App\Models\Grocer;
 use App\Models\OfferSearchDocument;
 use App\Search\OfferSearch;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -28,8 +29,8 @@ class OfferSearchPageController extends Controller
                 'q' => $request->queryText() ?? '',
                 'grocers' => $request->grocerSlugs(),
                 'sort' => $request->sort(),
-                'price_min' => $request->priceMin(),
-                'price_max' => $request->priceMax(),
+                'price_min' => $request->priceMin()?->__toString(),
+                'price_max' => $request->priceMax()?->__toString(),
             ],
             'grocers' => $this->grocers(),
             'results' => $this->results($results),
@@ -38,6 +39,8 @@ class OfferSearchPageController extends Controller
                 ['value' => 'price_asc', 'label' => 'Laveste pris'],
                 ['value' => 'unit_price_asc', 'label' => 'Enhedspris'],
                 ['value' => 'price_desc', 'label' => 'Højeste pris'],
+                ['value' => 'name_asc', 'label' => 'Navn A-Å'],
+                ['value' => 'name_desc', 'label' => 'Navn Å-A'],
             ],
             'quickSearches' => ['mælk', 'kaffe', 'kylling', 'smør', 'pasta'],
         ]);
@@ -48,8 +51,10 @@ class OfferSearchPageController extends Controller
      */
     private function grocers(): array
     {
+        $groupExpression = $this->productGroupExpression();
+
         $activeCounts = OfferSearchDocument::query()
-            ->selectRaw('grocer_slug, count(*) as offer_count')
+            ->selectRaw("grocer_slug, count(distinct {$groupExpression}) as offer_count")
             ->where('active_from', '<=', now())
             ->where('active_until', '>=', now())
             ->groupBy('grocer_slug')
@@ -68,6 +73,15 @@ class OfferSearchPageController extends Controller
             ])
             ->values()
             ->all();
+    }
+
+    private function productGroupExpression(): string
+    {
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            return "coalesce('canonical_' || canonical_product_id::text, 'scraped_' || scraped_offer_id::text)";
+        }
+
+        return "coalesce(concat('canonical_', canonical_product_id), concat('scraped_', scraped_offer_id))";
     }
 
     /**

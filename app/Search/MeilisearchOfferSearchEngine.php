@@ -116,14 +116,23 @@ class MeilisearchOfferSearchEngine implements OfferSearchEngine
 
     private function ensureIndexExists(): void
     {
-        $response = $this->request()->put($this->url('/indexes/'.$this->index()), [
+        $response = $this->request()->post($this->url('/indexes'), [
             'uid' => $this->index(),
             'primaryKey' => 'id',
         ]);
 
-        if (! $response->successful() && $response->status() !== 409) {
+        if (! $response->successful() && ! $this->isIndexAlreadyCreatedResponse($response->status(), $response->json())) {
             throw new RuntimeException('Meilisearch index creation failed with status '.$response->status());
         }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $body
+     */
+    private function isIndexAlreadyCreatedResponse(int $status, ?array $body): bool
+    {
+        return $status === 409
+            || ($status === 400 && ($body['code'] ?? null) === 'index_already_exists');
     }
 
     /**
@@ -195,11 +204,11 @@ class MeilisearchOfferSearchEngine implements OfferSearchEngine
         }
 
         if ($query->priceMin !== null) {
-            $filters[] = 'price >= '.$query->priceMin;
+            $filters[] = 'price >= '.$query->priceMin->__toString();
         }
 
         if ($query->priceMax !== null) {
-            $filters[] = 'price <= '.$query->priceMax;
+            $filters[] = 'price <= '.$query->priceMax->__toString();
         }
 
         return $filters;

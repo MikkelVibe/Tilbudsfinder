@@ -38,11 +38,11 @@ class DatabaseOfferSearchEngine implements OfferSearchEngine
         }
 
         if ($query->priceMin !== null) {
-            $documents->where('price', '>=', $query->priceMin);
+            $documents->where('price', '>=', $query->priceMin->__toString());
         }
 
         if ($query->priceMax !== null) {
-            $documents->where('price', '<=', $query->priceMax);
+            $documents->where('price', '<=', $query->priceMax->__toString());
         }
 
         if ($hasQuery) {
@@ -85,6 +85,7 @@ class DatabaseOfferSearchEngine implements OfferSearchEngine
             ->select([
                 'ranked.id',
                 'ranked.product_group_key',
+                'ranked.relevance_score',
             ])
             ->orderByRaw($this->productGroupOrderExpression($query->sort, $hasQuery))
             ->forPage($page, $query->perPage)
@@ -107,10 +108,10 @@ class DatabaseOfferSearchEngine implements OfferSearchEngine
     private function productGroupExpression(string $alias): string
     {
         if (DB::connection()->getDriverName() === 'pgsql') {
-            return "coalesce({$alias}.canonical_product_id::text, {$alias}.scraped_offer_id::text)";
+            return "coalesce('canonical_' || {$alias}.canonical_product_id::text, 'scraped_' || {$alias}.scraped_offer_id::text)";
         }
 
-        return "coalesce({$alias}.canonical_product_id, {$alias}.scraped_offer_id)";
+        return "coalesce(concat('canonical_', {$alias}.canonical_product_id), concat('scraped_', {$alias}.scraped_offer_id))";
     }
 
     private function displayTitleExpression(string $alias): string
@@ -197,6 +198,7 @@ class DatabaseOfferSearchEngine implements OfferSearchEngine
                 }
 
                 $document->product_group_key = $row->product_group_key;
+                $document->relevance_score = $row->relevance_score;
                 $document->product_offer_count = (int) ($stats->get($row->product_group_key)?->product_offer_count ?? 1);
                 $document->product_store_count = (int) ($stats->get($row->product_group_key)?->product_store_count ?? 1);
 

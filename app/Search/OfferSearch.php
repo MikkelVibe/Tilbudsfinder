@@ -2,6 +2,7 @@
 
 namespace App\Search;
 
+use Brick\Math\BigDecimal;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class OfferSearch
@@ -14,8 +15,8 @@ class OfferSearch
         array $grocerSlugs,
         string $sort,
         int $perPage,
-        ?float $priceMin = null,
-        ?float $priceMax = null,
+        ?BigDecimal $priceMin = null,
+        ?BigDecimal $priceMax = null,
     ): LengthAwarePaginator {
         $searchQuery = new OfferSearchQuery($query, $grocerSlugs, $sort, $perPage, $priceMin, $priceMax);
 

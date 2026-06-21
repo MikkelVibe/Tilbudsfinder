@@ -99,7 +99,7 @@ class OfferDetailPageTest extends TestCase
 
     public function test_same_product_offers_are_separated_from_similar_offers(): void
     {
-        $canonicalProduct = CanonicalProduct::create(['name' => 'Ben & Jerry Brookieees & Cream']);
+        $canonicalProduct = CanonicalProduct::factory()->create(['name' => 'Ben & Jerry Brookieees & Cream']);
         $currentOffer = $this->offer('B&J Brookieees & Cream', now()->subDay(), now()->addWeek(), category: 'Is', canonicalProduct: $canonicalProduct);
         $sameProduct = $this->offer('Ben & Jerry Brookieees & Cream', now()->subDay(), now()->addWeek(), canonicalProduct: $canonicalProduct);
         $sameCategory = $this->offer('Hansen Vaniljeis', now()->subDay(), now()->addWeek(), category: 'Is');

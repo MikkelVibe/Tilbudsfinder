@@ -129,7 +129,7 @@ class HomePageTest extends TestCase
                 ->where('allStoreSlugs', fn (mixed $slugs): bool => collect($slugs)->contains('netto')
                     && collect($slugs)->contains('spar')
                     && ! collect($slugs)->contains('disabled'))
-                ->where('enabledStoreCount', fn (int $count): bool => $count >= 2)
+                ->where('enabledStoreCount', Grocer::query()->where('is_enabled', true)->count())
                 ->etc()
             );
     }

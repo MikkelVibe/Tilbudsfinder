@@ -16,7 +16,7 @@ class OfferSearchDocumentBuilder
         ScrapedOffer::query()
             ->with(['grocer', 'paper', 'grocerProduct', 'productMatch.canonicalProduct'])
             ->where('import_batch_id', $batch->id)
-            ->each(fn (ScrapedOffer $offer): mixed => $this->updateForOffer($offer));
+            ->eachById(fn (ScrapedOffer $offer): mixed => $this->updateForOffer($offer));
     }
 
     public function updateForOffer(ScrapedOffer $offer): OfferSearchDocument

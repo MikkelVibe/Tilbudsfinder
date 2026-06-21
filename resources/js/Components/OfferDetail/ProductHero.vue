@@ -13,8 +13,8 @@ const titleParts = computed(() => String(props.product.name || '').split('&'));
 </script>
 
 <template>
-    <section class="grid items-stretch gap-6 border-b border-[#c9c1b4] py-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-8 lg:py-10">
-        <div class="relative order-2 grid h-[360px] w-full place-items-center overflow-hidden border border-[#d8d0c3] bg-[#eee8dd] p-0 sm:h-[480px] lg:order-1 lg:h-[760px]">
+    <section class="grid items-stretch gap-6 border-b border-[#c9c1b4] py-7 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-8">
+        <div class="relative order-2 grid h-[320px] w-full place-items-center overflow-hidden border border-[#d8d0c3] bg-[#eee8dd] p-0 sm:h-[420px] lg:order-1 lg:h-[560px]">
             <img
                 v-if="product.imageUrl"
                 :src="product.imageUrl"
@@ -24,7 +24,7 @@ const titleParts = computed(() => String(props.product.name || '').split('&'));
             <NoImagePlaceholder v-else />
         </div>
 
-        <aside class="order-1 flex max-h-[760px] flex-col overflow-hidden border border-[#c9c1b4] bg-[#f5f3ee] p-5 sm:p-6 lg:order-2 lg:h-[760px]">
+        <aside class="order-1 flex flex-col overflow-hidden border border-[#c9c1b4] bg-[#f5f3ee] p-5 sm:p-6 lg:order-2 lg:min-h-[560px]">
             <p class="border-b border-[#c9c1b4] pb-4 text-[10px] font-black uppercase tracking-[0.24em] text-[#6f746d]">Gælder nu</p>
 
             <div class="min-h-0 flex-1 py-6 text-center sm:text-left">

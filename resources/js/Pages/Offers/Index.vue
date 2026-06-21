@@ -1,6 +1,6 @@
 <script setup>
 import { Link, router } from '@inertiajs/vue3';
-import { computed, nextTick, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue';
 import SiteHeader from '../../Components/SiteHeader.vue';
 
 const props = defineProps({
@@ -58,6 +58,10 @@ watch(form, () => {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => visit(), 180);
 }, { deep: true });
+
+onUnmounted(() => {
+    clearTimeout(searchTimeout);
+});
 
 watch(() => form.q, () => {
     if (syncingFromProps) {
