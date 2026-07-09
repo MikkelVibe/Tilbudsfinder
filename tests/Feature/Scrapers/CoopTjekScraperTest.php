@@ -53,6 +53,43 @@ class CoopTjekScraperTest extends TestCase
         $this->assertSame('365discount', (new CoopTjekScraper(CoopBanner::discount365()))->grocerKey());
     }
 
+    public function test_it_imports_base_tjek_offers_when_incito_enrichment_fails(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        Http::preventStrayRequests();
+        Http::fake([
+            'squid-api.tjek.com/v2/catalogs*' => Http::response([
+                $this->catalog('weekly-paper', 'Uge 23', 12),
+            ]),
+            'squid-api.tjek.com/v2/offers?catalog_id=weekly-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->offer($number), range(1, 12))),
+            'squid-api.tjek.com/v4/rpc/generate_incito_from_publication*' => Http::response([
+                'code' => 1501,
+                'message' => 'Model not found',
+            ], 404),
+        ]);
+
+        $messages = [];
+        $scraper = new CoopTjekScraper(CoopBanner::kvickly());
+        $payloads = $scraper->fetchPapers(
+            $scraper->discoverPapers(),
+            progress: function (string $message) use (&$messages): void {
+                $messages[] = $message;
+            },
+        );
+
+        $this->assertCount(1, $payloads);
+
+        $payload = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertSame(12, $payload['catalog']['fetched_offer_count']);
+        $this->assertSame(0, $payload['catalog']['incito_enriched_offer_count']);
+        $this->assertSame('COOP Product 1', $payload['offers'][0]['heading']);
+        $this->assertArrayNotHasKey('_incito_enrichment', $payload['offers'][0]);
+        $this->assertTrue(collect($messages)->contains(
+            fn (string $message): bool => str_starts_with($message, 'Skipped Kvickly Incito enrichment for catalog weekly-paper: HTTP request returned status code 404:'),
+        ));
+    }
+
     public function test_it_fails_when_no_weekly_catalog_is_active(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');

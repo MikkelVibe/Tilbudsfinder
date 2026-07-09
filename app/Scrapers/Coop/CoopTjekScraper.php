@@ -74,8 +74,13 @@ class CoopTjekScraper implements GrocerScraper
             $offers = $this->fetchCatalogOffers($candidate->sourceExternalId, $limit);
             $this->progress($progress, 'Fetched '.count($offers)." {$this->banner->name} offers for catalog {$candidate->sourceExternalId}.".($limit ? ' after limit' : ''));
 
-            $incitoOffers = $this->fetchIncitoOffers($candidate->sourceExternalId);
-            $this->progress($progress, 'Fetched '.count($incitoOffers)." {$this->banner->name} Incito offer enrichments for catalog {$candidate->sourceExternalId}.");
+            try {
+                $incitoOffers = $this->fetchIncitoOffers($candidate->sourceExternalId);
+                $this->progress($progress, 'Fetched '.count($incitoOffers)." {$this->banner->name} Incito offer enrichments for catalog {$candidate->sourceExternalId}.");
+            } catch (\Throwable $exception) {
+                $incitoOffers = [];
+                $this->progress($progress, "Skipped {$this->banner->name} Incito enrichment for catalog {$candidate->sourceExternalId}: {$exception->getMessage()}");
+            }
 
             $offers = $this->enrichOffers($offers, $incitoOffers);
 
