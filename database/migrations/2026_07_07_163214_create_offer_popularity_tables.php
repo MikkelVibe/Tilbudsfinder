@@ -15,10 +15,10 @@ return new class extends Migration
             $table->id();
             $table->foreignUuid('scraped_offer_id')->constrained()->cascadeOnDelete();
             $table->char('session_hash', 64);
-            $table->string('event_type')->default('detail_view')->index();
+            $table->string('event_type')->default('detail_view');
             $table->timestampTz('occurred_at')->index();
             $table->string('user_agent_family')->nullable();
-            $table->boolean('is_bot')->default(false)->index();
+            $table->boolean('is_bot')->default(false);
             $table->timestampsTz();
 
             $table->index(['scraped_offer_id', 'occurred_at']);

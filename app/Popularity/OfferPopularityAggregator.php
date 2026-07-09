@@ -10,8 +10,11 @@ class OfferPopularityAggregator
 {
     public function aggregate(string $scrapedOfferId): void
     {
-        $this->aggregateScore($scrapedOfferId, OfferPopularity::WINDOW_24_HOURS, now()->subDay());
-        $this->aggregateScore($scrapedOfferId, OfferPopularity::WINDOW_7_DAYS, now()->subDays(7));
+        DB::transaction(function () use ($scrapedOfferId): void {
+            foreach (OfferPopularity::windows() as $window) {
+                $this->aggregateScore($scrapedOfferId, $window, OfferPopularity::sinceFor($window));
+            }
+        });
 
         Cache::forget(OfferPopularity::HOMEPAGE_CACHE_KEY);
     }
@@ -38,16 +41,20 @@ class OfferPopularityAggregator
      */
     private function metrics(string $scrapedOfferId, Carbon $since): array
     {
-        $query = DB::table('offer_popularity_events')
+        $metrics = DB::table('offer_popularity_events')
+            ->selectRaw('COUNT(*) as accepted_views')
+            ->selectRaw('COUNT(DISTINCT session_hash) as unique_sessions')
+            ->selectRaw('MAX(occurred_at) as last_event_at')
             ->where('scraped_offer_id', $scrapedOfferId)
             ->where('event_type', OfferPopularity::DETAIL_VIEW_EVENT)
             ->where('is_bot', false)
-            ->where('occurred_at', '>=', $since);
+            ->where('occurred_at', '>=', $since)
+            ->first();
 
         return [
-            'unique_sessions' => (clone $query)->distinct('session_hash')->count('session_hash'),
-            'accepted_views' => (clone $query)->count(),
-            'last_event_at' => (clone $query)->max('occurred_at'),
+            'unique_sessions' => (int) $metrics->unique_sessions,
+            'accepted_views' => (int) $metrics->accepted_views,
+            'last_event_at' => $metrics->last_event_at,
         ];
     }
 }

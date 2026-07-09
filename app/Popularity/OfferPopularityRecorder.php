@@ -65,7 +65,7 @@ class OfferPopularityRecorder
     {
         $userAgent = Str::lower((string) $request->userAgent());
 
-        return $userAgent !== '' && Str::contains($userAgent, [
+        return $userAgent === '' || Str::contains($userAgent, [
             'bot',
             'crawler',
             'spider',

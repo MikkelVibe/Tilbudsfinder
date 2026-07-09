@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\AggregateOfferPopularity;
 use App\Models\ScrapedOffer;
 use App\Popularity\OfferPopularity;
-use App\Popularity\OfferPopularityAggregator;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -15,11 +15,11 @@ use Illuminate\Support\Collection;
 #[Description('Refresh rolling offer popularity scores for active offers with scores or recent events.')]
 class RefreshOfferPopularityScores extends Command
 {
-    public function handle(OfferPopularityAggregator $aggregator): int
+    public function handle(): int
     {
         $chunkSize = max(1, (int) $this->option('chunk'));
-        $refreshed = 0;
-        $oldestRelevantEventAt = now()->subDays(7);
+        $dispatched = 0;
+        $oldestRelevantEventAt = OfferPopularity::sinceFor(OfferPopularity::WINDOW_7_DAYS);
 
         ScrapedOffer::query()
             ->select(['id'])
@@ -38,15 +38,15 @@ class RefreshOfferPopularityScores extends Command
                         ->where('offer_popularity_events.is_bot', false)
                         ->where('offer_popularity_events.occurred_at', '>=', $oldestRelevantEventAt));
             })
-            ->chunkById($chunkSize, function (Collection $offers) use ($aggregator, &$refreshed): void {
-                $offers->each(function (ScrapedOffer $offer) use ($aggregator, &$refreshed): void {
-                    $aggregator->aggregate($offer->id);
+            ->chunkById($chunkSize, function (Collection $offers) use (&$dispatched): void {
+                $offers->each(function (ScrapedOffer $offer) use (&$dispatched): void {
+                    AggregateOfferPopularity::dispatch($offer->id);
 
-                    $refreshed++;
+                    $dispatched++;
                 });
             });
 
-        $this->info(sprintf('Refreshed popularity scores for %d offers.', $refreshed));
+        $this->info(sprintf('Dispatched popularity score refresh jobs for %d offers.', $dispatched));
 
         return self::SUCCESS;
     }

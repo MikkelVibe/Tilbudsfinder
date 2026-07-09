@@ -57,15 +57,28 @@ class ScrapedOffer extends Model
     }
 
     #[Scope]
-    protected function publiclyActive(Builder $query, ?Carbon $at = null): void
+    protected function publiclyActive(Builder $query, ?Carbon $asOf = null): void
     {
-        $at ??= now();
+        $asOf ??= now();
 
         $query
             ->whereNotNull($query->qualifyColumn('price'))
             ->whereHas('paper', fn (Builder $paperQuery) => $paperQuery
-                ->where('active_from', '<=', $at)
-                ->where('active_until', '>=', $at));
+                ->where('active_from', '<=', $asOf)
+                ->where('active_until', '>=', $asOf));
+    }
+
+    #[Scope]
+    protected function forHomepageCards(Builder $query): void
+    {
+        $query
+            ->select(['id', 'grocer_id', 'paper_id', 'grocer_product_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit', 'compare_unit', 'unit_price', 'created_at'])
+            ->with([
+                'grocerProduct:id,image_url',
+                'paper:id,active_from,active_until',
+                'productMatch.canonicalProduct:id,image_url',
+            ])
+            ->publiclyActive();
     }
 
     protected function casts(): array

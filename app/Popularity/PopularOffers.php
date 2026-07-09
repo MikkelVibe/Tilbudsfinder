@@ -16,13 +16,19 @@ class PopularOffers
     public function homepageOffers(): Collection
     {
         $offerIds = Cache::remember(OfferPopularity::HOMEPAGE_CACHE_KEY, now()->addMinutes(5), function (): array {
-            $ids = $this->rankedOfferIds(OfferPopularity::WINDOW_24_HOURS, now()->subDay());
+            $ids = $this->rankedOfferIds(
+                OfferPopularity::WINDOW_24_HOURS,
+                OfferPopularity::sinceFor(OfferPopularity::WINDOW_24_HOURS),
+            );
 
             if ($ids !== []) {
                 return $ids;
             }
 
-            return $this->rankedOfferIds(OfferPopularity::WINDOW_7_DAYS, now()->subDays(7));
+            return $this->rankedOfferIds(
+                OfferPopularity::WINDOW_7_DAYS,
+                OfferPopularity::sinceFor(OfferPopularity::WINDOW_7_DAYS),
+            );
         });
 
         if ($offerIds === []) {
@@ -66,12 +72,6 @@ class PopularOffers
     private function activeOffersQuery(): Builder
     {
         return ScrapedOffer::query()
-            ->select(['id', 'grocer_id', 'paper_id', 'grocer_product_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit', 'compare_unit', 'unit_price', 'created_at'])
-            ->with([
-                'grocerProduct:id,image_url',
-                'paper:id,active_from,active_until',
-                'productMatch.canonicalProduct:id,image_url',
-            ])
-            ->publiclyActive();
+            ->forHomepageCards();
     }
 }

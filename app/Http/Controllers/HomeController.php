@@ -101,13 +101,7 @@ class HomeController extends Controller
     private function activeOffersQuery(): Builder
     {
         return ScrapedOffer::query()
-            ->select(['id', 'grocer_id', 'paper_id', 'grocer_product_id', 'title', 'image_url', 'price', 'package_amount', 'package_unit_original', 'package_unit', 'compare_unit', 'unit_price', 'created_at'])
-            ->with([
-                'grocerProduct:id,image_url',
-                'paper:id,active_from,active_until',
-                'productMatch.canonicalProduct:id,image_url',
-            ])
-            ->publiclyActive();
+            ->forHomepageCards();
     }
 
     /**

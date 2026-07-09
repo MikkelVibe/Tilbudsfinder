@@ -7,6 +7,7 @@ use App\Search\MeilisearchOfferSearchEngine;
 use App\Search\OfferSearchEngine;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\UrlRoutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -37,7 +38,7 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('offer-views', function (Request $request): array {
             $offer = $request->route('scrapedOffer');
-            $offerId = is_object($offer) && method_exists($offer, 'getRouteKey')
+            $offerId = $offer instanceof UrlRoutable
                 ? $offer->getRouteKey()
                 : (string) $offer;
 

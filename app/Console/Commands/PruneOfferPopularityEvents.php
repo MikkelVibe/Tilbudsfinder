@@ -11,11 +11,28 @@ use Illuminate\Support\Facades\DB;
 #[Description('Prune raw offer popularity events older than 30 days.')]
 class PruneOfferPopularityEvents extends Command
 {
+    private const CHUNK_SIZE = 1000;
+
     public function handle(): int
     {
-        $deleted = DB::table('offer_popularity_events')
-            ->where('occurred_at', '<', now()->subDays(30))
-            ->delete();
+        $deleted = 0;
+        $cutoff = now()->subDays(30);
+
+        while (true) {
+            $ids = DB::table('offer_popularity_events')
+                ->where('occurred_at', '<', $cutoff)
+                ->orderBy('id')
+                ->limit(self::CHUNK_SIZE)
+                ->pluck('id');
+
+            if ($ids->isEmpty()) {
+                break;
+            }
+
+            $deleted += DB::table('offer_popularity_events')
+                ->whereIn('id', $ids)
+                ->delete();
+        }
 
         $this->info(sprintf('Pruned %d offer popularity events.', $deleted));
 

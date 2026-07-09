@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\AggregateOfferPopularity;
 use App\Models\Grocer;
 use App\Models\ImportBatch;
 use App\Models\Paper;
@@ -16,6 +17,7 @@ use Illuminate\Session\Store;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class OfferPopularityTest extends TestCase
@@ -90,7 +92,7 @@ class OfferPopularityTest extends TestCase
             );
     }
 
-    public function test_refresh_command_recomputes_rolling_scores_as_events_age_out(): void
+    public function test_aggregator_recomputes_rolling_scores_as_events_age_out(): void
     {
         $offer = $this->offer('Rolling yoghurt');
 
@@ -107,8 +109,7 @@ class OfferPopularityTest extends TestCase
 
         $this->travel(2)->hours();
 
-        $this->artisan('offers:refresh-popularity-scores')
-            ->assertExitCode(0);
+        $this->aggregate($offer);
 
         $this->assertDatabaseHas('offer_popularity_scores', [
             'scraped_offer_id' => $offer->id,
@@ -117,27 +118,26 @@ class OfferPopularityTest extends TestCase
         ]);
     }
 
-    public function test_refresh_command_bootstraps_scores_from_recent_events(): void
+    public function test_refresh_command_dispatches_score_jobs_for_scored_and_recent_event_offers(): void
     {
-        $offer = $this->offer('Bootstrap skyr');
+        Queue::fake([AggregateOfferPopularity::class]);
 
-        $this->event($offer, 'fresh-session', now());
+        $scoredOffer = $this->offer('Rolling yoghurt');
+        $recentEventOffer = $this->offer('Bootstrap skyr');
+        $expiredOffer = $this->offer('Expired skyr', now()->subWeeks(2), now()->subWeek());
 
-        $this->assertDatabaseCount('offer_popularity_scores', 0);
+        $this->event($scoredOffer, 'scored-session', now()->subMinutes(5));
+        $this->aggregate($scoredOffer);
+        $this->event($recentEventOffer, 'fresh-session', now());
+        $this->event($expiredOffer, 'expired-session', now());
 
         $this->artisan('offers:refresh-popularity-scores')
             ->assertExitCode(0);
 
-        $this->assertDatabaseHas('offer_popularity_scores', [
-            'scraped_offer_id' => $offer->id,
-            'window' => OfferPopularity::WINDOW_24_HOURS,
-            'score' => 1,
-        ]);
-        $this->assertDatabaseHas('offer_popularity_scores', [
-            'scraped_offer_id' => $offer->id,
-            'window' => OfferPopularity::WINDOW_7_DAYS,
-            'score' => 1,
-        ]);
+        Queue::assertPushed(AggregateOfferPopularity::class, fn (AggregateOfferPopularity $job): bool => $job->scrapedOfferId === $scoredOffer->id);
+        Queue::assertPushed(AggregateOfferPopularity::class, fn (AggregateOfferPopularity $job): bool => $job->scrapedOfferId === $recentEventOffer->id);
+        Queue::assertNotPushed(AggregateOfferPopularity::class, fn (AggregateOfferPopularity $job): bool => $job->scrapedOfferId === $expiredOffer->id);
+        Queue::assertPushedTimes(AggregateOfferPopularity::class, 2);
     }
 
     public function test_offer_detail_get_requests_do_not_record_popularity_events(): void
@@ -181,6 +181,11 @@ class OfferPopularityTest extends TestCase
             ->assertNoContent();
 
         $this
+            ->withHeader('User-Agent', '')
+            ->post(route('offers.view', $activeOffer))
+            ->assertNoContent();
+
+        $this
             ->withHeader('User-Agent', 'Mozilla/5.0 Normal Browser')
             ->post(route('offers.view', $expiredOffer))
             ->assertNoContent();
@@ -209,6 +214,26 @@ class OfferPopularityTest extends TestCase
             ->withHeader('User-Agent', 'Mozilla/5.0 Browser 21')
             ->post(route('offers.view', $offer))
             ->assertTooManyRequests();
+    }
+
+    public function test_prune_command_deletes_old_events_in_chunks(): void
+    {
+        $offer = $this->offer('Pruneable oats');
+
+        foreach (range(1, 1001) as $event) {
+            $this->event($offer, "old-session-{$event}", now()->subDays(31));
+        }
+
+        $this->event($offer, 'fresh-session', now()->subDays(29));
+
+        $this->artisan('offers:prune-popularity-events')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseCount('offer_popularity_events', 1);
+        $this->assertDatabaseHas('offer_popularity_events', [
+            'scraped_offer_id' => $offer->id,
+            'session_hash' => hash('sha256', 'fresh-session'),
+        ]);
     }
 
     public function test_offer_detail_page_caps_recorded_views_per_session_per_day(): void
