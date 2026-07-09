@@ -7,6 +7,7 @@ use App\Search\MeilisearchOfferSearchEngine;
 use App\Search\OfferSearchEngine;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\UrlRoutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -33,6 +34,18 @@ class AppServiceProvider extends ServiceProvider
     {
         RateLimiter::for('api', function (Request $request): Limit {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+        });
+
+        RateLimiter::for('offer-views', function (Request $request): array {
+            $offer = $request->route('scrapedOffer');
+            $offerId = $offer instanceof UrlRoutable
+                ? $offer->getRouteKey()
+                : (string) $offer;
+
+            return [
+                Limit::perMinute(120)->by('ip:'.$request->ip()),
+                Limit::perMinute(20)->by('offer:'.$request->ip().':'.$offerId),
+            ];
         });
     }
 }

@@ -41,6 +41,8 @@ class OfferDetailController extends Controller
 
     /**
      * @return array{
+     *     id: string,
+     *     viewTrackingUrl: string,
      *     store: string|null,
      *     name: string,
      *     description: string|null,
@@ -67,6 +69,8 @@ class OfferDetailController extends Controller
     private function productPayload(ScrapedOffer $offer): array
     {
         return [
+            'id' => $offer->id,
+            'viewTrackingUrl' => route('offers.view', $offer),
             'store' => $offer->grocer?->name,
             'name' => $offer->title,
             'description' => $this->description($offer),
@@ -387,12 +391,7 @@ class OfferDetailController extends Controller
                 'productMatch:id,scraped_offer_id,canonical_product_id,status,confidence',
             ])
             ->whereKeyNot($excludedIds->all())
-            ->whereNotNull('price')
-            ->whereHas('paper', function (Builder $query): void {
-                $query
-                    ->where('active_from', '<=', now())
-                    ->where('active_until', '>=', now());
-            });
+            ->publiclyActive();
     }
 
     /**

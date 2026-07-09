@@ -25,6 +25,8 @@ class OfferDetailPageTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Offers/Show', false)
+                ->where('product.id', $offer->id)
+                ->where('product.viewTrackingUrl', route('offers.view', $offer))
                 ->where('product.name', 'Expired coffee beans')
                 ->etc()
             );
