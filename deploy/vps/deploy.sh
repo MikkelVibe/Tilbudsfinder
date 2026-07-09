@@ -38,6 +38,10 @@ mkdir -p backups nginx
 
 docker compose pull app queue scheduler
 
+public_volume="${COMPOSE_PROJECT_NAME:-$(basename "$APP_DIR")}_public-data"
+docker volume create "$public_volume" >/dev/null
+docker run --rm -v "$public_volume:/public-data" "$TILBUDSFINDER_IMAGE" sh -c 'rm -rf /public-data/build && cp -a /var/www/html/public/build /public-data/build'
+
 docker compose up -d postgres redis
 
 attempts=0
