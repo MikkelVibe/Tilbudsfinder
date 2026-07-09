@@ -6,6 +6,7 @@ import NutritionTable from '../../Components/OfferDetail/NutritionTable.vue';
 import PriceHistoryGraph from '../../Components/OfferDetail/PriceHistoryGraph.vue';
 import ProductHero from '../../Components/OfferDetail/ProductHero.vue';
 import SiteHeader from '../../Components/SiteHeader.vue';
+import { recordOfferView } from '../../Support/viewTracking';
 
 const props = defineProps({
     product: {
@@ -43,6 +44,7 @@ async function measureDescriptionOverflow() {
 }
 
 onMounted(() => {
+    recordOfferView(props.product.viewTrackingUrl);
     measureDescriptionOverflow();
     window.addEventListener('resize', measureDescriptionOverflow);
 });

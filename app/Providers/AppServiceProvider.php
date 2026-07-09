@@ -34,5 +34,17 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('api', function (Request $request): Limit {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });
+
+        RateLimiter::for('offer-views', function (Request $request): array {
+            $offer = $request->route('scrapedOffer');
+            $offerId = is_object($offer) && method_exists($offer, 'getRouteKey')
+                ? $offer->getRouteKey()
+                : (string) $offer;
+
+            return [
+                Limit::perMinute(120)->by('ip:'.$request->ip()),
+                Limit::perMinute(20)->by('offer:'.$request->ip().':'.$offerId),
+            ];
+        });
     }
 }

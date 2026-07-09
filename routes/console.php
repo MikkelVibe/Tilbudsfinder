@@ -11,3 +11,11 @@ Artisan::command('inspire', function () {
 Schedule::command('scraper:schedule')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
+
+Schedule::command('offers:refresh-popularity-scores')
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
+
+Schedule::command('offers:prune-popularity-events')
+    ->daily()
+    ->withoutOverlapping();

@@ -4,19 +4,20 @@ namespace App\Http\Controllers;
 
 use App\Models\Grocer;
 use App\Models\ScrapedOffer;
+use App\Popularity\PopularOffers;
 use Illuminate\Database\Eloquent\Builder;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class HomeController extends Controller
 {
-    public function __invoke(): Response
+    public function __invoke(PopularOffers $popularOffers): Response
     {
         $enabledStoreSlugs = $this->enabledStoreSlugs();
 
         return Inertia::render('Home', [
             'appName' => config('app.name'),
-            'popularOffers' => $this->popularOffers(),
+            'popularOffers' => $this->popularOffers($popularOffers),
             'latestOffers' => $this->latestOffers(),
             'stores' => $this->stores(),
             'allStoreSlugs' => $enabledStoreSlugs,
@@ -27,12 +28,10 @@ class HomeController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    private function popularOffers(): array
+    private function popularOffers(PopularOffers $popularOffers): array
     {
-        return $this->activeOffersQuery()
-            ->inRandomOrder()
-            ->limit(3)
-            ->get()
+        return $popularOffers
+            ->homepageOffers()
             ->map(fn (ScrapedOffer $offer): array => $this->offerCard($offer))
             ->values()
             ->all();
@@ -69,9 +68,7 @@ class HomeController extends Controller
             ->select(['id', 'slug', 'name'])
             ->where('is_enabled', true)
             ->withCount(['scrapedOffers as offer_count' => fn ($query) => $query
-                ->whereHas('paper', fn ($paperQuery) => $paperQuery
-                    ->where('active_from', '<=', now())
-                    ->where('active_until', '>=', now()))])
+                ->publiclyActive()])
             ->orderByDesc('offer_count')
             ->orderBy('name')
             ->limit(6)
@@ -110,10 +107,7 @@ class HomeController extends Controller
                 'paper:id,active_from,active_until',
                 'productMatch.canonicalProduct:id,image_url',
             ])
-            ->whereNotNull('price')
-            ->whereHas('paper', fn ($query) => $query
-                ->where('active_from', '<=', now())
-                ->where('active_until', '>=', now()));
+            ->publiclyActive();
     }
 
     /**
