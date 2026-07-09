@@ -92,6 +92,27 @@ class OfferPopularityTest extends TestCase
             );
     }
 
+    public function test_homepage_falls_back_to_recent_active_offers_when_popularity_is_empty(): void
+    {
+        $olderOffer = $this->offer('Older active coffee');
+
+        $this->travel(1)->second();
+
+        $newerOffer = $this->offer('Newer active pasta');
+        $expiredOffer = $this->offer('Expired butter', now()->subWeeks(2), now()->subWeek());
+
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertDontSee($expiredOffer->id)
+            ->assertInertia(fn ($page) => $page
+                ->component('Home', false)
+                ->where('popularOffers.0.id', $newerOffer->id)
+                ->where('popularOffers.1.id', $olderOffer->id)
+                ->missing('popularOffers.2')
+                ->etc()
+            );
+    }
+
     public function test_aggregator_recomputes_rolling_scores_as_events_age_out(): void
     {
         $offer = $this->offer('Rolling yoghurt');

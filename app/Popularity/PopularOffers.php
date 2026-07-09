@@ -25,10 +25,16 @@ class PopularOffers
                 return $ids;
             }
 
-            return $this->rankedOfferIds(
+            $ids = $this->rankedOfferIds(
                 OfferPopularity::WINDOW_7_DAYS,
                 OfferPopularity::sinceFor(OfferPopularity::WINDOW_7_DAYS),
             );
+
+            if ($ids !== []) {
+                return $ids;
+            }
+
+            return $this->fallbackOfferIds();
         });
 
         if ($offerIds === []) {
@@ -62,6 +68,20 @@ class PopularOffers
             ->orderBy('offer_popularity_scores.scraped_offer_id')
             ->limit(OfferPopularity::HOMEPAGE_LIMIT)
             ->pluck('offer_popularity_scores.scraped_offer_id')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function fallbackOfferIds(): array
+    {
+        return $this->activeOffersQuery()
+            ->orderByDesc('created_at')
+            ->orderBy('id')
+            ->limit(OfferPopularity::HOMEPAGE_LIMIT)
+            ->pluck('id')
             ->values()
             ->all();
     }
