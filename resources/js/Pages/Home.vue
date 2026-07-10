@@ -105,7 +105,7 @@ function allStoresHref() {
                 <section class="mt-12">
                     <div class="mb-5 flex items-end justify-between gap-6 border-b-2 border-[#173124] pb-3">
                         <h2 class="font-serif text-3xl font-bold tracking-[-0.03em] text-[#18251e]">Populære tilbud</h2>
-                        <button type="button" class="text-xs font-extrabold uppercase tracking-[0.2em] text-[#173124] hover:text-[#b3261e]">Se alle</button>
+                        <Link href="/tilbud" prefetch class="text-xs font-extrabold uppercase tracking-[0.2em] text-[#173124] hover:text-[#b3261e]">Se alle</Link>
                     </div>
 
                     <div v-if="popularOffers.length" class="grid gap-4 md:grid-cols-3">

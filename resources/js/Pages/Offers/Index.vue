@@ -26,19 +26,14 @@ const props = defineProps({
     },
 });
 
-const form = reactive({
-    q: props.filters.q || '',
-    grocers: [...(props.filters.grocers || [])],
-    sort: props.filters.sort || 'relevance',
-    price_min: props.filters.price_min ?? '',
-    price_max: props.filters.price_max ?? '',
-});
+const form = reactive(normalizeFilters(props.filters));
 
 const loadedImages = reactive({});
 const displayedOffers = ref([...props.results.data]);
 const paginationMeta = ref({ ...props.results.meta });
 let searchTimeout = null;
 let syncingFromProps = false;
+let syncedFilters = normalizeFilters(props.filters);
 
 const activeGrocers = computed(() => new Set(form.grocers));
 const hasActiveFilters = computed(() => form.grocers.length > 0 || form.price_min !== '' || form.price_max !== '');
@@ -83,15 +78,48 @@ watch(() => props.results, (results) => {
 
 watch(() => props.filters, async (filters) => {
     syncingFromProps = true;
-    form.q = filters.q || '';
-    form.grocers = [...(filters.grocers || [])];
-    form.sort = filters.sort || 'relevance';
-    form.price_min = filters.price_min ?? '';
-    form.price_max = filters.price_max ?? '';
+    const nextFilters = normalizeFilters(filters);
+
+    if (form.q === syncedFilters.q) {
+        form.q = nextFilters.q;
+    }
+
+    if (sameGrocers(form.grocers, syncedFilters.grocers)) {
+        form.grocers = nextFilters.grocers;
+    }
+
+    if (form.sort === syncedFilters.sort) {
+        form.sort = nextFilters.sort;
+    }
+
+    if (form.price_min === syncedFilters.price_min) {
+        form.price_min = nextFilters.price_min;
+    }
+
+    if (form.price_max === syncedFilters.price_max) {
+        form.price_max = nextFilters.price_max;
+    }
+
+    syncedFilters = nextFilters;
 
     await nextTick();
     syncingFromProps = false;
 }, { deep: true });
+
+function normalizeFilters(filters) {
+    return {
+        q: filters.q || '',
+        grocers: [...(filters.grocers || [])],
+        sort: filters.sort || 'relevance',
+        price_min: filters.price_min ?? '',
+        price_max: filters.price_max ?? '',
+    };
+}
+
+function sameGrocers(grocers, syncedGrocers) {
+    return grocers.length === syncedGrocers.length
+        && grocers.every((grocer, index) => grocer === syncedGrocers[index]);
+}
 
 function visit(page = 1) {
     router.get('/tilbud', cleanedParams(page), {
