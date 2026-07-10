@@ -39,6 +39,7 @@ const displayedOffers = ref([...props.results.data]);
 const paginationMeta = ref({ ...props.results.meta });
 let searchTimeout = null;
 let syncingFromProps = false;
+let syncedQuery = props.filters.q || '';
 
 const activeGrocers = computed(() => new Set(form.grocers));
 const hasActiveFilters = computed(() => form.grocers.length > 0 || form.price_min !== '' || form.price_max !== '');
@@ -83,7 +84,13 @@ watch(() => props.results, (results) => {
 
 watch(() => props.filters, async (filters) => {
     syncingFromProps = true;
-    form.q = filters.q || '';
+    const query = filters.q || '';
+
+    if (form.q === syncedQuery) {
+        form.q = query;
+    }
+
+    syncedQuery = query;
     form.grocers = [...(filters.grocers || [])];
     form.sort = filters.sort || 'relevance';
     form.price_min = filters.price_min ?? '';
