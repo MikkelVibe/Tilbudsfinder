@@ -222,6 +222,12 @@ class ScraperAgentApiTest extends TestCase
 
         $this->assertSame(ScrapeJobStatus::Retrying, $job->refresh()->status);
         $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
+        $this->assertSame([
+            'fetched_paper_count' => 2,
+            'imported_paper_count' => 1,
+            'skipped_duplicate_count' => 0,
+            'last_failed_attempt' => 1,
+        ], $job->context);
         $this->assertSame(ImportBatchStatus::Failed, ImportBatch::query()->where('source_external_id', 'paper-unmatched')->value('status'));
         $successfulBatch = ImportBatch::query()->where('source_external_id', 'paper-valid')->firstOrFail();
 

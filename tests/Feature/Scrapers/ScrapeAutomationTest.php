@@ -7,8 +7,10 @@ use App\Enums\ScrapeJobStatus;
 use App\Models\Grocer;
 use App\Models\ImportBatch;
 use App\Models\ScrapeJob;
+use App\Models\ScraperAgent;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
+use App\Scrapers\ScrapeJobWorker;
 use App\Scrapers\ScraperRunService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -200,6 +202,45 @@ class ScrapeAutomationTest extends TestCase
         $this->assertSame(1, $job->attempt);
         $this->assertSame('2026-06-01 12:30:00', $job->scheduled_for->format('Y-m-d H:i:s'));
         $this->assertSame(GrocerHealthStatus::Failing, $grocer->health_status);
+    }
+
+    public function test_claiming_a_retry_clears_previous_attempt_paper_counts(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $agent = ScraperAgent::factory()->create();
+        $job = ScrapeJob::factory()->for($grocer)->create([
+            'scraper_agent_id' => null,
+            'status' => ScrapeJobStatus::Retrying,
+            'attempt' => 1,
+            'scheduled_for' => now()->subMinute(),
+            'context' => [
+                'fetched_paper_count' => 2,
+                'imported_paper_count' => 1,
+                'skipped_duplicate_count' => 0,
+                'last_failed_attempt' => 1,
+                'diagnostic' => 'preserved',
+            ],
+        ]);
+
+        $worker = app(ScrapeJobWorker::class);
+        $claimedJob = $worker->claimJob($agent);
+
+        $this->assertNotNull($claimedJob);
+        $this->assertSame($job->id, $claimedJob->id);
+        $this->assertSame(ScrapeJobStatus::Running, $claimedJob->status);
+        $this->assertSame(2, $claimedJob->attempt);
+        $this->assertSame([
+            'last_failed_attempt' => 1,
+            'diagnostic' => 'preserved',
+        ], $claimedJob->context);
+
+        $worker->markFailed($claimedJob, 'Attempt 2 failed before importing payloads.');
+
+        $this->assertSame([
+            'last_failed_attempt' => 2,
+            'diagnostic' => 'preserved',
+        ], $claimedJob->refresh()->context);
     }
 
     public function test_worker_marks_failure_as_failed_and_stale_when_retry_would_cross_midnight(): void

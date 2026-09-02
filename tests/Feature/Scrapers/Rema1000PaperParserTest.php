@@ -25,6 +25,8 @@ class Rema1000PaperParserTest extends TestCase
 
         $this->assertSame('week-36', $paper->sourceExternalId);
         $this->assertSame('Uge 36', $paper->title);
+        $this->assertSame('2026-08-29 22:00:00', $paper->activeFrom->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-09-05 21:59:59', $paper->activeUntil->format('Y-m-d H:i:s'));
         $this->assertTrue($paper->reconcileExistingPaper);
         $this->assertCount(1, $paper->offers);
         $this->assertCount(1, $paper->issues);

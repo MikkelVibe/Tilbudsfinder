@@ -127,7 +127,10 @@ class RemaTjekClient
         return Http::acceptJson()
             ->connectTimeout(5)
             ->timeout(30)
-            ->retry([250, 1000], static fn (Throwable $exception): bool => $exception instanceof ConnectionException
-                || ($exception instanceof RequestException && $exception->response->serverError()));
+            ->retry(
+                [250, 1000],
+                when: static fn (Throwable $exception): bool => $exception instanceof ConnectionException
+                    || ($exception instanceof RequestException && $exception->response->serverError()),
+            );
     }
 }

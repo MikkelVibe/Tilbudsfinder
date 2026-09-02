@@ -86,6 +86,23 @@ class RemaOfferMatcherTest extends TestCase
     }
 
     #[Test]
+    public function it_does_not_count_an_equal_score_conflict_as_resolved(): void
+    {
+        $result = (new RemaOfferMatcher)->match(
+            $this->catalog(),
+            [
+                $this->offer('offer-one', 'Toiletpapir', 20, 1, 'pcs'),
+                $this->offer('offer-two', 'Toiletpapir', 20, 1, 'pcs'),
+            ],
+            [$this->product(170238, 'TOILETPAPIR', '1 STK.', 20, 20, 'stk')],
+        );
+
+        $this->assertSame(0, $result->resolvedConflictCount);
+        $this->assertSame([], $result->matchedOffers);
+        $this->assertSame(2, $result->ambiguousTjekOfferCount);
+    }
+
+    #[Test]
     public function it_matches_equivalent_piece_unit_aliases(): void
     {
         $result = (new RemaOfferMatcher)->match(

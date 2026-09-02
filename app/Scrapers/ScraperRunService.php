@@ -82,6 +82,15 @@ class ScraperRunService
         }
 
         if ($failures !== []) {
+            $scrapeJob?->update([
+                'context' => [
+                    ...($scrapeJob->context ?? []),
+                    'fetched_paper_count' => count($payloads),
+                    'imported_paper_count' => $importedCount,
+                    'skipped_duplicate_count' => $skippedDuplicateCount,
+                ],
+            ]);
+
             $grocer->update([
                 'health_status' => GrocerHealthStatus::Failing,
                 'last_failure_at' => now(),

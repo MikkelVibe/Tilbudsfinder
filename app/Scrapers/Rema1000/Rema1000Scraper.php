@@ -7,7 +7,10 @@ use App\Scrapers\DTO\PaperCandidate;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\GrocerScraper;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use JsonException;
+use Throwable;
 
 class Rema1000Scraper implements GrocerScraper
 {
@@ -60,7 +63,16 @@ class Rema1000Scraper implements GrocerScraper
             $catalog = $candidate->sourcePayload;
             $catalogId = $candidate->sourceExternalId;
             $this->progress($progress, "Fetching every Tjek offer for {$catalogId}...");
-            $tjekOffers = $this->tjekClient->offers($catalog);
+
+            try {
+                $tjekOffers = $this->tjekClient->offers($catalog);
+            } catch (ConnectionException|RequestException|ScraperFetchException $exception) {
+                $payloads[] = $this->failedCatalogPayload($candidate, $exception);
+                $this->progress($progress, "Failed to fetch Tjek catalog {$catalogId}; preserved the failure and continued.");
+
+                continue;
+            }
+
             $match = $this->matcher->match($catalog, $tjekOffers, $products);
 
             $payloads[] = new RawPaperPayload(
@@ -86,6 +98,33 @@ class Rema1000Scraper implements GrocerScraper
         }
 
         return $payloads;
+    }
+
+    private function failedCatalogPayload(PaperCandidate $candidate, Throwable $exception): RawPaperPayload
+    {
+        return new RawPaperPayload(
+            sourceExternalId: $candidate->sourceExternalId,
+            rawPayload: $this->encode([
+                'catalog' => [
+                    ...$candidate->sourcePayload,
+                    'source_strategy' => 'rema_tjek_offer_fetch_failed',
+                    'fetched_offer_count' => 0,
+                    'matched_tjek_offer_count' => 0,
+                    'matched_product_count' => 0,
+                    'ambiguous_tjek_offer_count' => 0,
+                    'missing_tjek_offer_count' => 0,
+                    'resolved_product_conflict_count' => 0,
+                ],
+                'offers' => [],
+                'issues' => [[
+                    'code' => 'tjek_catalog_fetch_failed',
+                    'source_catalog_id' => $candidate->sourceExternalId,
+                    'message' => "Tjek catalog {$candidate->sourceExternalId} could not be fetched: {$exception->getMessage()}",
+                    'context' => ['exception_class' => $exception::class],
+                ]],
+            ]),
+            title: $candidate->title,
+        );
     }
 
     public function parse(RawPaperPayload $payload): ParsedPaperInput

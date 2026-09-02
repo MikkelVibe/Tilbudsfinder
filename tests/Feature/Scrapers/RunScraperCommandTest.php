@@ -233,17 +233,17 @@ class RunScraperCommandTest extends TestCase
         $this->assertSame(5, collect($results->items())->filter(fn (OfferSearchDocument $document): bool => $document->product_offer_count === 2)->count());
     }
 
-    public function test_it_imports_a_later_rema_paper_when_an_earlier_paper_fails(): void
+    public function test_it_imports_a_later_rema_paper_when_an_earlier_catalog_fetch_fails(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
         Storage::fake('local');
         Http::preventStrayRequests();
-        $this->fakeRemaResponsesWithUnmatchedFirstPaper();
+        $this->fakeRemaResponsesWithFailedFirstPaperFetch();
         $grocer = Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
         Exceptions::fake();
 
         $this->artisan('scraper:run rema1000')
-            ->expectsOutputToContain('paper-unmatched')
+            ->expectsOutputToContain('paper-failed')
             ->assertFailed();
 
         Exceptions::assertReported(
@@ -251,9 +251,11 @@ class RunScraperCommandTest extends TestCase
         );
         Exceptions::assertReportedCount(1);
 
-        $this->assertSame(ImportBatchStatus::Failed, ImportBatch::query()->where('source_external_id', 'paper-unmatched')->value('status'));
+        $failedBatch = ImportBatch::query()->where('source_external_id', 'paper-failed')->firstOrFail();
         $successfulBatch = ImportBatch::query()->where('source_external_id', 'paper-valid')->firstOrFail();
 
+        $this->assertSame(ImportBatchStatus::Failed, $failedBatch->status);
+        $this->assertSame('tjek_catalog_fetch_failed', $failedBatch->metadata['import_issues'][0]['code']);
         $this->assertSame(ImportBatchStatus::Succeeded, $successfulBatch->status);
         $this->assertSame(10, $successfulBatch->published_offer_count);
         $this->assertSame(10, ScrapedOffer::query()->where('import_batch_id', $successfulBatch->id)->count());
@@ -301,19 +303,19 @@ class RunScraperCommandTest extends TestCase
         ]);
     }
 
-    private function fakeRemaResponsesWithUnmatchedFirstPaper(): void
+    private function fakeRemaResponsesWithFailedFirstPaperFetch(): void
     {
         Http::fake([
             'squid-api.tjek.com/v2/catalogs*' => Http::response([
-                $this->catalog('paper-unmatched', 'Uge 23', 10),
+                $this->catalog('paper-failed', 'Uge 23', 11),
                 $this->catalog('paper-valid', 'Uge 23 Indstik', 10, true),
             ]),
             'api.digital.rema1000.dk/api/search/products*' => Http::response([
                 'data' => array_map(fn (int $productId): array => $this->remaProduct($productId, true), range(11, 20)),
                 'meta' => ['pagination' => ['last_page' => 1, 'total' => 10]],
             ]),
-            'squid-api.tjek.com/v2/offers?catalog_id=paper-unmatched&offset=0&limit=100' => Http::response(array_map(
-                fn (int $productId): array => $this->remaTjekOffer($productId, 'paper-unmatched'),
+            'squid-api.tjek.com/v2/offers?catalog_id=paper-failed&offset=0&limit=100' => Http::response(array_map(
+                fn (int $productId): array => $this->remaTjekOffer($productId, 'paper-failed'),
                 range(1, 10),
             )),
             'squid-api.tjek.com/v2/offers?catalog_id=paper-valid&offset=0&limit=100' => Http::response(array_map(

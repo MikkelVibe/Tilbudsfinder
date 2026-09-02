@@ -205,12 +205,15 @@ class RemaOfferMatcher
                 continue;
             }
 
-            $resolved++;
             $productId = (string) $productId;
             usort($productAssignments, static fn (array $left, array $right): int => $right['score'] <=> $left['score']);
             $winnerIndex = $productAssignments[0]['score'] >= $productAssignments[1]['score'] + 7
                 ? $productAssignments[0]['outcome_index']
                 : null;
+
+            if ($winnerIndex !== null) {
+                $resolved++;
+            }
 
             foreach ($productAssignments as $assignment) {
                 $outcomeIndex = $assignment['outcome_index'];

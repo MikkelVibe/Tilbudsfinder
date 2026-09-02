@@ -6,6 +6,7 @@ const moduleUrl = new URL('../../resources/js/Support/analyticsConsent.js', impo
 function browserEnvironment({
     href = 'https://tilbudsfinder.dk/tilbud?q=alice%40example.com&page=2',
     storedConsent = null,
+    storageWriteFails = false,
 } = {}) {
     const storage = new Map();
     const scripts = [];
@@ -20,7 +21,13 @@ function browserEnvironment({
         location,
         localStorage: {
             getItem: (key) => storage.get(key) ?? null,
-            setItem: (key, value) => storage.set(key, value),
+            setItem: (key, value) => {
+                if (storageWriteFails) {
+                    throw new Error('Storage is unavailable.');
+                }
+
+                storage.set(key, value);
+            },
         },
     };
 
@@ -129,4 +136,20 @@ test('rejecting statistics persists the decision without loading GA', async () =
     assert.equal(consent.version, 2);
     assert.equal(consent.statistics, false);
     assert.ok(Number.isFinite(Date.parse(consent.decidedAt)));
+});
+
+test('accepted statistics remain active for the session when storage writes fail', async () => {
+    const environment = browserEnvironment({ storageWriteFails: true });
+    const analytics = await analyticsModule();
+
+    analytics.setStatisticsConsent(true);
+
+    const pageViews = dataLayerCalls().filter(([command, event]) => command === 'event' && event === 'page_view');
+
+    assert.equal(environment.scripts.length, 1);
+    assert.deepEqual(pageViews, [
+        ['event', 'page_view', { page_location: 'https://tilbudsfinder.dk/tilbud' }],
+    ]);
+    assert.equal(analytics.getStatisticsConsent(), true);
+    assert.equal(environment.storage.has('tilbudsfinder_cookie_consent'), false);
 });

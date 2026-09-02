@@ -76,7 +76,10 @@ class RemaAdvertisedProductClient
                 'X-Timezone' => 'Copenhagen/Europe',
                 'X-Locale' => 'da',
             ])
-            ->retry([250, 1000], static fn (Throwable $exception): bool => $exception instanceof ConnectionException
-                || ($exception instanceof RequestException && $exception->response->serverError()));
+            ->retry(
+                [250, 1000],
+                when: static fn (Throwable $exception): bool => $exception instanceof ConnectionException
+                    || ($exception instanceof RequestException && $exception->response->serverError()),
+            );
     }
 }

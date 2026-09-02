@@ -8,6 +8,7 @@ use App\Enums\ScraperAgentStatus;
 use App\Models\ScrapeJob;
 use App\Models\ScraperAgent;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -89,6 +90,14 @@ class ScrapeJobWorker
                 return null;
             }
 
+            $context = $job->status === ScrapeJobStatus::Retrying
+                ? Arr::except($job->context ?? [], [
+                    'fetched_paper_count',
+                    'imported_paper_count',
+                    'skipped_duplicate_count',
+                ])
+                : $job->context;
+
             $job->update([
                 'scraper_agent_id' => $agent->id,
                 'status' => ScrapeJobStatus::Running,
@@ -97,6 +106,7 @@ class ScrapeJobWorker
                 'started_at' => now(),
                 'finished_at' => null,
                 'failure_reason' => null,
+                'context' => $context,
             ]);
 
             return $job->refresh()->load('grocer');

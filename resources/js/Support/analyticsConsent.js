@@ -5,6 +5,7 @@ const consentLifetimeSeconds = consentLifetimeMs / 1000;
 
 let analyticsLoaded = false;
 let lastTrackedLocation = null;
+let fallbackStatisticsConsent = null;
 
 function measurementId() {
     return document.querySelector('meta[name="google-analytics-id"]')?.content || null;
@@ -40,7 +41,11 @@ function writeStoredConsent(statistics) {
                 decidedAt: new Date().toISOString(),
             }),
         );
-    } catch {}
+
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function deleteAnalyticsCookies(id) {
@@ -109,7 +114,7 @@ function applyStatisticsConsent(statistics) {
 }
 
 export function getStatisticsConsent() {
-    return readStoredConsent()?.statistics ?? null;
+    return fallbackStatisticsConsent ?? readStoredConsent()?.statistics ?? null;
 }
 
 export function isAnalyticsConfigured() {
@@ -117,13 +122,12 @@ export function isAnalyticsConfigured() {
 }
 
 export function setStatisticsConsent(statistics) {
-    writeStoredConsent(statistics);
+    fallbackStatisticsConsent = writeStoredConsent(statistics) ? null : statistics;
     applyStatisticsConsent(statistics);
 }
 
 export function initializeAnalyticsConsent() {
-    const consent = readStoredConsent();
-    applyStatisticsConsent(consent?.statistics ?? false);
+    applyStatisticsConsent(getStatisticsConsent() ?? false);
 }
 
 export function trackPageView() {
@@ -132,7 +136,7 @@ export function trackPageView() {
 
     if (
         !id
-        || readStoredConsent()?.statistics !== true
+        || getStatisticsConsent() !== true
         || typeof window.gtag !== 'function'
         || pageLocation === lastTrackedLocation
     ) {

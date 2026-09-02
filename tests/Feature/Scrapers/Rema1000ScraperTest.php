@@ -2,10 +2,12 @@
 
 namespace Tests\Feature\Scrapers;
 
-use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\Rema1000\Rema1000Scraper;
+use App\Scrapers\Rema1000\RemaAdvertisedProductClient;
+use App\Scrapers\Rema1000\RemaTjekClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -91,32 +93,94 @@ class Rema1000ScraperTest extends TestCase
         Http::assertSentCount(4);
     }
 
-    public function test_it_fails_when_tjek_pagination_does_not_match_declared_offer_count(): void
+    public function test_it_preserves_a_failed_tjek_catalog_and_continues_fetching_later_catalogs(): void
     {
         CarbonImmutable::setTestNow('2026-09-01 10:00:00');
         Http::preventStrayRequests();
-        Http::fake([
-            'squid-api.tjek.com/v2/catalogs*' => Http::response([$this->catalog(2)]),
-            'squid-api.tjek.com/v2/offers*' => Http::response([$this->tjekOffer('one', 'Product', 10, 1, 'kg')]),
-            'api.digital.rema1000.dk/api/search/products*' => Http::response([
-                'data' => [$this->product(1, 'PRODUCT', '1 KG.', 10, 10, 'kg')],
-                'meta' => ['pagination' => ['last_page' => 1, 'total' => 1]],
-            ]),
-        ]);
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), '/catalogs')) {
+                return Http::response([
+                    $this->catalog(2, 'paper-failed', 'Uge 36'),
+                    $this->catalog(1, 'paper-valid', 'Uge 36 Indstik'),
+                ]);
+            }
 
-        $this->expectException(ScraperFetchException::class);
-        $this->expectExceptionMessage('declares 2 offers but returned 1');
+            if (str_contains($request->url(), '/search/products')) {
+                return Http::response([
+                    'data' => [$this->product(1, 'PRODUCT', '1 KG.', 10, 10, 'kg')],
+                    'meta' => ['pagination' => ['last_page' => 1, 'total' => 1]],
+                ]);
+            }
+
+            if (($request->data()['catalog_id'] ?? null) === 'paper-failed') {
+                return Http::response([$this->tjekOffer('failed-offer', 'Product', 10, 1, 'kg', 'paper-failed')]);
+            }
+
+            if (($request->data()['catalog_id'] ?? null) === 'paper-valid') {
+                return Http::response([$this->tjekOffer('valid-offer', 'Product', 10, 1, 'kg', 'paper-valid')]);
+            }
+
+            return null;
+        });
 
         $scraper = new Rema1000Scraper;
-        $scraper->fetchPapers($scraper->discoverPapers());
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
+        $failed = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+        $valid = json_decode($payloads[1]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertCount(2, $payloads);
+        $this->assertSame('paper-failed', $payloads[0]->sourceExternalId);
+        $this->assertSame('rema_tjek_offer_fetch_failed', $failed['catalog']['source_strategy']);
+        $this->assertSame(0, $failed['catalog']['fetched_offer_count']);
+        $this->assertSame('tjek_catalog_fetch_failed', $failed['issues'][0]['code']);
+        $this->assertStringContainsString('declares 2 offers but returned 1', $failed['issues'][0]['message']);
+        $this->assertSame('paper-valid', $payloads[1]->sourceExternalId);
+        $this->assertSame('1', (string) $valid['offers'][0]['rema_product']['id']);
+        $this->assertCount(1, Http::recorded(
+            fn (Request $request): bool => str_contains($request->url(), '/search/products'),
+        ));
+    }
+
+    public function test_rema_product_client_does_not_retry_client_errors(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'api.digital.rema1000.dk/api/search/products*' => Http::response([], 404),
+        ]);
+
+        try {
+            (new RemaAdvertisedProductClient)->fetch();
+            $this->fail('Expected the REMA product request to fail.');
+        } catch (RequestException $exception) {
+            $this->assertSame(404, $exception->response->status());
+        }
+
+        Http::assertSentCount(1);
+    }
+
+    public function test_rema_tjek_client_does_not_retry_client_errors(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'squid-api.tjek.com/v2/offers*' => Http::response([], 404),
+        ]);
+
+        try {
+            (new RemaTjekClient)->offers($this->catalog());
+            $this->fail('Expected the Tjek offer request to fail.');
+        } catch (RequestException $exception) {
+            $this->assertSame(404, $exception->response->status());
+        }
+
+        Http::assertSentCount(1);
     }
 
     /** @return array<string, mixed> */
-    private function catalog(int $offerCount = 2): array
+    private function catalog(int $offerCount = 2, string $id = 'paper-week-36', string $label = 'Uge 36'): array
     {
         return [
-            'id' => 'paper-week-36',
-            'label' => 'Uge 36',
+            'id' => $id,
+            'label' => $label,
             'run_from' => '2026-08-29T22:00:00+00:00',
             'run_till' => '2026-09-05T21:59:59+00:00',
             'offer_count' => $offerCount,
@@ -126,11 +190,11 @@ class Rema1000ScraperTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function tjekOffer(string $id, string $heading, int|float $price, int|float $size, string $unit): array
+    private function tjekOffer(string $id, string $heading, int|float $price, int|float $size, string $unit, string $catalogId = 'paper-week-36'): array
     {
         return [
             'id' => $id,
-            'catalog_id' => 'paper-week-36',
+            'catalog_id' => $catalogId,
             'heading' => $heading,
             'description' => '',
             'pricing' => ['price' => $price],
