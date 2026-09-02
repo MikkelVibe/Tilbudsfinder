@@ -178,6 +178,7 @@ class RunScraperCommandTest extends TestCase
 
     public function test_it_handles_a_new_weekly_rema_paper_arriving_while_the_current_paper_is_still_active(): void
     {
+        config()->set('queue.default', 'sync');
         CarbonImmutable::setTestNow('2026-06-03 12:00:00');
         Storage::fake('local');
         Http::preventStrayRequests();
