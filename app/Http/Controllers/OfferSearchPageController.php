@@ -5,15 +5,15 @@ namespace App\Http\Controllers;
 use App\Http\Requests\OfferSearchPageRequest;
 use App\Models\Grocer;
 use App\Models\OfferSearchDocument;
+use App\Search\DatabaseOfferSearchEngine;
 use App\Search\OfferSearch;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class OfferSearchPageController extends Controller
 {
-    public function __invoke(OfferSearchPageRequest $request, OfferSearch $search): Response
+    public function __invoke(OfferSearchPageRequest $request, OfferSearch $search, DatabaseOfferSearchEngine $databaseSearch): Response
     {
         $results = $search->search(
             query: $request->queryText(),
@@ -32,7 +32,7 @@ class OfferSearchPageController extends Controller
                 'price_min' => $request->priceMin()?->__toString(),
                 'price_max' => $request->priceMax()?->__toString(),
             ],
-            'grocers' => $this->grocers(),
+            'grocers' => $this->grocers($databaseSearch),
             'results' => $this->results($results),
             'sortOptions' => [
                 ['value' => 'relevance', 'label' => 'Relevans'],
@@ -49,16 +49,9 @@ class OfferSearchPageController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    private function grocers(): array
+    private function grocers(DatabaseOfferSearchEngine $databaseSearch): array
     {
-        $groupExpression = $this->productGroupExpression();
-
-        $activeCounts = OfferSearchDocument::query()
-            ->selectRaw("grocer_slug, count(distinct {$groupExpression}) as offer_count")
-            ->where('active_from', '<=', now())
-            ->where('active_until', '>=', now())
-            ->groupBy('grocer_slug')
-            ->pluck('offer_count', 'grocer_slug');
+        $activeCounts = $databaseSearch->activeProductCountsByGrocer();
 
         return Grocer::query()
             ->select(['slug', 'name'])
@@ -73,15 +66,6 @@ class OfferSearchPageController extends Controller
             ])
             ->values()
             ->all();
-    }
-
-    private function productGroupExpression(): string
-    {
-        if (DB::connection()->getDriverName() === 'pgsql') {
-            return "coalesce('canonical_' || canonical_product_id::text, 'scraped_' || scraped_offer_id::text)";
-        }
-
-        return "coalesce(concat('canonical_', canonical_product_id), concat('scraped_', scraped_offer_id))";
     }
 
     /**

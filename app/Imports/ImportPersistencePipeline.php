@@ -60,19 +60,26 @@ class ImportPersistencePipeline
 
                 $this->storeRawPayload($batch, $grocer, $paperInput);
 
-                $paper = Paper::create([
-                    'grocer_id' => $grocer->id,
-                    'import_batch_id' => $batch->id,
-                    'source_external_id' => $paperInput->sourceExternalId,
-                    'title' => $paperInput->title,
-                    'active_from' => $paperInput->activeFrom,
-                    'active_until' => $paperInput->activeUntil,
-                ]);
+                $importIssues = $this->serializedImportIssues($paperInput);
+
+                $paper = $this->lockOrCreatePaper($grocer, $batch, $paperInput);
 
                 $publishedCount = 0;
                 $failureCount = 0;
 
                 foreach ($paperInput->offers as $offerInput) {
+                    if ($paperInput->reconcileExistingPaper && blank($offerInput->sourceProductId)) {
+                        $importIssues[] = [
+                            'code' => 'missing_rema_product_id',
+                            'source_catalog_id' => $paperInput->sourceExternalId,
+                            'source_offer_id' => $offerInput->sourceOfferId,
+                            'message' => 'Matched REMA offer was withheld because it has no REMA product ID.',
+                            'context' => ['title' => $offerInput->title],
+                        ];
+
+                        continue;
+                    }
+
                     $normalizedOffer = $this->offerNormalizer->normalize($offerInput);
 
                     if ($normalizedOffer->status === NormalizedOfferStatus::Rejected) {
@@ -93,6 +100,11 @@ class ImportPersistencePipeline
                         'normalization_failure_count' => $failureCount,
                         'finished_at' => now(),
                         'failure_reason' => 'Import produced zero publishable offers.',
+                        'metadata' => [
+                            ...($batch->metadata ?? []),
+                            'import_issue_count' => count($importIssues),
+                            'import_issues' => $importIssues,
+                        ],
                     ]);
 
                     return $batch->refresh();
@@ -103,7 +115,21 @@ class ImportPersistencePipeline
                     'published_offer_count' => $publishedCount,
                     'normalization_failure_count' => $failureCount,
                     'finished_at' => now(),
+                    'metadata' => [
+                        ...($batch->metadata ?? []),
+                        'import_issue_count' => count($importIssues),
+                        'import_issues' => $importIssues,
+                    ],
                 ]);
+
+                $paper->update([
+                    'import_batch_id' => $batch->id,
+                    'title' => $paperInput->title,
+                    'active_from' => $paperInput->activeFrom,
+                    'active_until' => $paperInput->activeUntil,
+                ]);
+
+                $this->searchDocumentBuilder->rebuildForImportBatch($batch);
 
                 $grocer->update([
                     'health_status' => GrocerHealthStatus::Healthy,
@@ -123,7 +149,6 @@ class ImportPersistencePipeline
                 throw new ImportPipelineException($batch->failure_reason ?? 'Import failed.');
             }
 
-            $this->rebuildSearchDocuments($batch);
             $this->dispatchProductMatching($batch);
 
             return $batch;
@@ -162,34 +187,59 @@ class ImportPersistencePipeline
         }
     }
 
-    private function rebuildSearchDocuments(ImportBatch $batch): void
-    {
-        try {
-            $this->searchDocumentBuilder->rebuildForImportBatch($batch);
-        } catch (Throwable $exception) {
-            Log::warning('Search document rebuild failed after successful import.', [
-                'import_batch_id' => $batch->id,
-                'exception' => $exception::class,
-                'message' => $exception->getMessage(),
-            ]);
-        }
-    }
-
     private function validateInput(Grocer $grocer, ParsedPaperInput $paperInput): void
     {
         if (! $this->allowsSmallParsedOfferCount($paperInput) && count($paperInput->offers) < self::MINIMUM_PARSED_OFFERS) {
             throw new ImportPipelineException('Parsed paper must contain at least '.self::MINIMUM_PARSED_OFFERS.' offers.');
         }
 
-        if (Paper::query()->where('grocer_id', $grocer->id)->where('source_external_id', $paperInput->sourceExternalId)->exists()) {
+        if (! $paperInput->reconcileExistingPaper && Paper::query()->where('grocer_id', $grocer->id)->where('source_external_id', $paperInput->sourceExternalId)->exists()) {
             throw new DuplicatePaperImportException('Paper has already been imported for this grocer.');
         }
     }
 
     private function allowsSmallParsedOfferCount(ParsedPaperInput $paperInput): bool
     {
-        return ($paperInput->metadata['source_strategy'] ?? null) === 'nemlig_product_groups'
-            && isset($paperInput->metadata['interval_key']);
+        return (($paperInput->metadata['source_strategy'] ?? null) === 'nemlig_product_groups'
+            && isset($paperInput->metadata['interval_key']))
+            || $paperInput->reconcileExistingPaper;
+    }
+
+    private function lockOrCreatePaper(Grocer $grocer, ImportBatch $batch, ParsedPaperInput $paperInput): Paper
+    {
+        $paper = Paper::query()
+            ->where('grocer_id', $grocer->id)
+            ->where('source_external_id', $paperInput->sourceExternalId)
+            ->lockForUpdate()
+            ->first();
+
+        if ($paper !== null) {
+            return $paper;
+        }
+
+        return Paper::create([
+            'grocer_id' => $grocer->id,
+            'import_batch_id' => $batch->id,
+            'source_external_id' => $paperInput->sourceExternalId,
+            'title' => $paperInput->title,
+            'active_from' => $paperInput->activeFrom,
+            'active_until' => $paperInput->activeUntil,
+        ]);
+    }
+
+    /** @return list<array{code: string, source_catalog_id: ?string, source_offer_id: ?string, message: string, context: array<string, mixed>|null}> */
+    private function serializedImportIssues(ParsedPaperInput $paperInput): array
+    {
+        return array_map(
+            fn ($issue): array => [
+                'code' => $issue->code,
+                'source_catalog_id' => $issue->sourceCatalogId ?? $paperInput->sourceExternalId,
+                'source_offer_id' => $issue->sourceOfferId,
+                'message' => $issue->message,
+                'context' => $issue->context ?: null,
+            ],
+            $paperInput->issues,
+        );
     }
 
     private function storeRawPayload(ImportBatch $batch, Grocer $grocer, ParsedPaperInput $paperInput): void

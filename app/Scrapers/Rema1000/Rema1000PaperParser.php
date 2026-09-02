@@ -2,10 +2,9 @@
 
 namespace App\Scrapers\Rema1000;
 
+use App\Imports\DTO\ImportIssueInput;
 use App\Imports\DTO\ParsedPaperInput;
 use App\Normalization\DTO\ParsedOfferInput;
-use App\Normalization\Enums\NormalizedOfferStatus;
-use App\Normalization\OfferNormalizer;
 use App\Scrapers\Exceptions\ScraperParseException;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
@@ -13,12 +12,6 @@ use JsonException;
 
 class Rema1000PaperParser
 {
-    private const MINIMUM_PARSED_OFFERS = 10;
-
-    public function __construct(
-        private readonly OfferNormalizer $offerNormalizer = new OfferNormalizer,
-    ) {}
-
     public function parse(string $rawPayload): ParsedPaperInput
     {
         $payload = $this->decode($rawPayload);
@@ -33,6 +26,7 @@ class Rema1000PaperParser
             title: $this->optionalString($catalog, 'label'),
             sourceUrl: 'https://shop.rema1000.dk/avisvarer',
             rawPayload: $rawPayload,
+            issues: $this->parseImportIssues(Arr::get($payload, 'issues', [])),
             metadata: array_filter([
                 'dealer_id' => $this->optionalString($catalog, 'dealer_id'),
                 'dealer_name' => $this->optionalString($catalog, 'dealer.name'),
@@ -43,7 +37,13 @@ class Rema1000PaperParser
                 'page_count' => Arr::get($catalog, 'page_count'),
                 'pdf_url' => $this->optionalString($catalog, 'pdf_url'),
                 'source_strategy' => $this->optionalString($catalog, 'source_strategy'),
+                'matched_tjek_offer_count' => Arr::get($catalog, 'matched_tjek_offer_count'),
+                'matched_product_count' => Arr::get($catalog, 'matched_product_count'),
+                'ambiguous_tjek_offer_count' => Arr::get($catalog, 'ambiguous_tjek_offer_count'),
+                'missing_tjek_offer_count' => Arr::get($catalog, 'missing_tjek_offer_count'),
+                'resolved_product_conflict_count' => Arr::get($catalog, 'resolved_product_conflict_count'),
             ], static fn (mixed $value): bool => $value !== null),
+            reconcileExistingPaper: true,
         );
 
         $this->validateQuality($paper);
@@ -85,25 +85,6 @@ class Rema1000PaperParser
     }
 
     /**
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>|null
-     */
-    private function optionalArrayValue(array $payload, string $key): ?array
-    {
-        $value = Arr::get($payload, $key);
-
-        if ($value === null) {
-            return null;
-        }
-
-        if (! is_array($value)) {
-            throw new ScraperParseException("REMA 1000 payload {$key} must be an object when present.");
-        }
-
-        return $value;
-    }
-
-    /**
      * @param  list<array<string, mixed>>  $offers
      * @return list<ParsedOfferInput>
      */
@@ -116,95 +97,48 @@ class Rema1000PaperParser
                 throw new ScraperParseException("REMA 1000 offer at index {$index} must be an object.");
             }
 
-            $parsedOffers[] = (array_key_exists('algolia', $offer) || array_key_exists('catalog_product', $offer)) && isset($offer['product_detail'], $offer['advertised_price'])
-                ? $this->parseProductOffer($offer)
-                : $this->parseLegacyTjekOffer($offer);
+            if (! isset($offer['rema_product'], $offer['advertised_price'], $offer['tjek_offer'])) {
+                throw new ScraperParseException("REMA 1000 offer at index {$index} must contain rema_product, advertised_price, and tjek_offer.");
+            }
+
+            $parsedOffers[] = $this->parseMatchedProductOffer($offer);
         }
 
         return $parsedOffers;
     }
 
-    /**
-     * @param  array<string, mixed>  $offer
-     */
-    private function parseProductOffer(array $offer): ParsedOfferInput
+    /** @param array<string, mixed> $offer */
+    private function parseMatchedProductOffer(array $offer): ParsedOfferInput
     {
-        $algolia = $this->optionalArrayValue($offer, 'algolia');
-        $catalogProduct = $this->optionalArrayValue($offer, 'catalog_product');
-        $detail = $this->arrayValue($offer, 'product_detail');
+        $product = $this->arrayValue($offer, 'rema_product');
         $advertisedPrice = $this->arrayValue($offer, 'advertised_price');
-        $product = $catalogProduct ?? $algolia ?? [];
+        $tjekOffer = $this->arrayValue($offer, 'tjek_offer');
 
         return new ParsedOfferInput(
             title: $this->requiredString($product, 'name'),
-            price: Arr::get($advertisedPrice, 'price', Arr::get($product, 'pricing.price')),
+            price: Arr::get($advertisedPrice, 'price'),
             packageText: $this->optionalString($product, 'underline'),
-            sourceUnitPrice: $this->sourceUnitPrice($advertisedPrice, $product),
-            description: $this->optionalString($product, 'description_short') ?? $this->optionalString($product, 'description'),
-            imageUrl: $this->productImageUrl($product, $detail),
-            sourceOfferId: $this->optionalScalarString($detail, 'id') ?? $this->optionalScalarString($algolia ?? [], 'objectID') ?? $this->optionalScalarString($product, 'id'),
-            sourceProductId: $this->optionalScalarString($detail, 'id') ?? $this->optionalScalarString($product, 'id'),
+            sourceUnitPrice: Arr::get($advertisedPrice, 'compare_unit_price'),
+            description: $this->optionalString($product, 'description') ?? $this->optionalString($tjekOffer, 'description'),
+            imageUrl: $this->productImageUrl($product, $product),
+            sourceOfferId: $this->optionalString($tjekOffer, 'id'),
+            sourceProductId: $this->optionalScalarString($product, 'id'),
             purchaseLimitText: $this->productPurchaseLimitText($advertisedPrice, $product),
             metadata: array_filter([
-                'brand' => $this->optionalString($product, 'hf2'),
-                'department_id' => Arr::get($product, 'department_id'),
-                'department_name' => $this->optionalString($product, 'department_name'),
-                'category_id' => Arr::get($product, 'category_id'),
-                'category_name' => $this->optionalString($product, 'category_name'),
-                'bar_codes' => Arr::get($detail, 'bar_codes', Arr::get($product, 'bar_codes')),
+                'department_id' => Arr::get($product, 'department.id'),
+                'category_id' => Arr::get($product, 'category.id'),
+                'category' => $this->optionalString($product, 'department.name'),
+                'subcategory' => $this->optionalString($product, 'category.name'),
+                'declaration' => $this->optionalString($product, 'declaration'),
+                'bar_codes' => Arr::get($product, 'barcodes'),
                 'price_starts_at' => $this->optionalString($advertisedPrice, 'starting_at'),
                 'price_ends_at' => $this->optionalString($advertisedPrice, 'ending_at'),
                 'is_campaign' => Arr::get($advertisedPrice, 'is_campaign'),
-                'normal_price' => Arr::get($product, 'pricing.normal_price'),
-                'catalog_price_changes_on' => $this->optionalString($product, 'pricing.price_changes_on'),
-                'catalog_price_changes_type' => $this->optionalString($product, 'pricing.price_changes_type'),
-                'nutrition_info' => Arr::get($catalogProduct ?? [], 'nutrition_info'),
-                'declaration' => $this->optionalString($catalogProduct ?? [], 'declaration'),
-                'missing_from_catalog' => Arr::get($offer, 'discovery_comparison.missing_from_catalog'),
-                'missing_from_algolia' => Arr::get($offer, 'discovery_comparison.missing_from_algolia'),
+                'match_score' => Arr::get($offer, 'score'),
+                'catalog_page' => Arr::get($tjekOffer, 'catalog_page'),
             ], static fn (mixed $value): bool => $value !== null),
             sourcePayload: $offer,
         );
-    }
-
-    /**
-     * @param  array<string, mixed>  $offer
-     */
-    private function parseLegacyTjekOffer(array $offer): ParsedOfferInput
-    {
-        return new ParsedOfferInput(
-            title: $this->requiredString($offer, 'heading'),
-            price: Arr::get($offer, 'pricing.price'),
-            packageText: $this->packageText($offer),
-            description: $this->optionalString($offer, 'description'),
-            imageUrl: $this->imageUrl($offer),
-            sourceOfferId: $this->optionalString($offer, 'id'),
-            purchaseLimitText: $this->purchaseLimitText($offer),
-            metadata: array_filter([
-                'catalog_page' => Arr::get($offer, 'catalog_page'),
-                'catalog_id' => $this->optionalString($offer, 'catalog_id'),
-            ], static fn (mixed $value): bool => $value !== null),
-            sourcePayload: $offer,
-        );
-    }
-
-    /**
-     * @param  array<string, mixed>  $advertisedPrice
-     * @param  array<string, mixed>  $algolia
-     */
-    private function sourceUnitPrice(array $advertisedPrice, array $algolia): string|int|float|null
-    {
-        return Arr::get($advertisedPrice, 'compare_unit_price')
-            ?? $this->priceFromUnitText($this->optionalString($algolia, 'pricing.price_per_unit'));
-    }
-
-    private function priceFromUnitText(?string $unitPrice): ?string
-    {
-        if ($unitPrice === null || preg_match('/(?<price>\d+(?:[,.]\d+)?)/', $unitPrice, $matches) !== 1) {
-            return null;
-        }
-
-        return $matches['price'];
     }
 
     /**
@@ -239,86 +173,44 @@ class Rema1000PaperParser
         return 'Maks. '.(int) $maxQuantity;
     }
 
-    /**
-     * @param  array<string, mixed>  $offer
-     */
-    private function packageText(array $offer): ?string
-    {
-        $parts = array_filter([
-            $this->optionalString($offer, 'description'),
-            $this->quantityText($offer),
-        ], static fn (?string $value): bool => $value !== null && trim($value) !== '');
-
-        if ($parts === []) {
-            return null;
-        }
-
-        return implode(' ', $parts);
-    }
-
-    /**
-     * @param  array<string, mixed>  $offer
-     */
-    private function quantityText(array $offer): ?string
-    {
-        $from = Arr::get($offer, 'quantity.size.from');
-        $to = Arr::get($offer, 'quantity.size.to');
-        $unit = $this->optionalString($offer, 'quantity.unit.symbol');
-
-        if (! is_numeric($from) || ! is_numeric($to) || $unit === null) {
-            return null;
-        }
-
-        if ((string) $from === (string) $to) {
-            return "{$from} {$unit}";
-        }
-
-        return "{$from}-{$to} {$unit}";
-    }
-
-    /**
-     * @param  array<string, mixed>  $offer
-     */
-    private function imageUrl(array $offer): ?string
-    {
-        foreach (['images.zoom', 'images.view', 'images.thumb'] as $key) {
-            $url = $this->optionalString($offer, $key);
-
-            if ($url !== null) {
-                return $url;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param  array<string, mixed>  $offer
-     */
-    private function purchaseLimitText(array $offer): ?string
-    {
-        $description = $this->optionalString($offer, 'description');
-
-        if ($description === null || preg_match('/Note:\s*Maks\.\s*(?<limit>\d+)/iu', $description, $matches) !== 1) {
-            return null;
-        }
-
-        return 'Maks. '.$matches['limit'];
-    }
-
     private function validateQuality(ParsedPaperInput $paper): void
     {
-        if (count($paper->offers) < self::MINIMUM_PARSED_OFFERS) {
-            throw new ScraperParseException('REMA 1000 paper must contain at least '.self::MINIMUM_PARSED_OFFERS.' parsed offers.');
+        $fetched = (int) ($paper->metadata['fetched_offer_count'] ?? -1);
+        $accounted = (int) ($paper->metadata['matched_tjek_offer_count'] ?? 0)
+            + (int) ($paper->metadata['ambiguous_tjek_offer_count'] ?? 0)
+            + (int) ($paper->metadata['missing_tjek_offer_count'] ?? 0);
+
+        if ($fetched < 0 || $fetched !== $accounted) {
+            throw new ScraperParseException('REMA 1000 Tjek accounting does not reconcile matched, ambiguous, and missing offers.');
         }
 
-        foreach ($paper->offers as $offer) {
-            if ($this->offerNormalizer->normalize($offer)->status !== NormalizedOfferStatus::Rejected) {
-                return;
+        if (count($paper->offers) !== (int) ($paper->metadata['matched_product_count'] ?? -1)) {
+            throw new ScraperParseException('REMA 1000 matched product accounting does not reconcile with parsed offers.');
+        }
+    }
+
+    /**
+     * @return list<ImportIssueInput>
+     */
+    private function parseImportIssues(mixed $issues): array
+    {
+        if (! is_array($issues) || ! array_is_list($issues)) {
+            throw new ScraperParseException('REMA 1000 import issues must be a list.');
+        }
+
+        return array_map(function (mixed $issue): ImportIssueInput {
+            if (! is_array($issue)) {
+                throw new ScraperParseException('REMA 1000 import issue must be an object.');
             }
-        }
 
-        throw new ScraperParseException('REMA 1000 paper produced zero publishable offers.');
+            return new ImportIssueInput(
+                code: $this->requiredString($issue, 'code'),
+                message: $this->requiredString($issue, 'message'),
+                sourceCatalogId: $this->optionalString($issue, 'source_catalog_id'),
+                sourceOfferId: $this->optionalString($issue, 'source_offer_id'),
+                context: is_array(Arr::get($issue, 'context')) ? Arr::get($issue, 'context') : [],
+            );
+        }, $issues);
     }
 
     /**

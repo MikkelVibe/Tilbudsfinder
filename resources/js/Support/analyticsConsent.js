@@ -1,7 +1,10 @@
 const consentStorageKey = 'tilbudsfinder_cookie_consent';
-const consentVersion = 1;
+const consentVersion = 2;
+const consentLifetimeMs = 365 * 24 * 60 * 60 * 1000;
+const consentLifetimeSeconds = consentLifetimeMs / 1000;
 
 let analyticsLoaded = false;
+let lastTrackedLocation = null;
 
 function measurementId() {
     return document.querySelector('meta[name="google-analytics-id"]')?.content || null;
@@ -10,12 +13,18 @@ function measurementId() {
 function readStoredConsent() {
     try {
         const consent = JSON.parse(window.localStorage.getItem(consentStorageKey));
+        const decidedAt = Date.parse(consent?.decidedAt);
 
-        if (consent?.version !== consentVersion || typeof consent.statistics !== 'boolean') {
+        if (
+            consent?.version !== consentVersion
+            || typeof consent.statistics !== 'boolean'
+            || !Number.isFinite(decidedAt)
+            || Date.now() - decidedAt >= consentLifetimeMs
+        ) {
             return null;
         }
 
-        return consent.statistics;
+        return consent;
     } catch {
         return null;
     }
@@ -28,6 +37,7 @@ function writeStoredConsent(statistics) {
             JSON.stringify({
                 version: consentVersion,
                 statistics,
+                decidedAt: new Date().toISOString(),
             }),
         );
     } catch {}
@@ -53,6 +63,7 @@ function deleteAnalyticsCookies(id) {
 function loadGoogleAnalytics(id) {
     if (analyticsLoaded) {
         window[`ga-disable-${id}`] = false;
+        trackPageView();
         return;
     }
 
@@ -64,16 +75,22 @@ function loadGoogleAnalytics(id) {
     };
 
     window.gtag('js', new Date());
-    window.gtag('config', id);
+    window.gtag('config', id, {
+        cookie_expires: consentLifetimeSeconds,
+        cookie_update: false,
+        send_page_view: false,
+    });
 
     const script = document.createElement('script');
     script.async = true;
     script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(id)}`;
     document.head.appendChild(script);
+    trackPageView();
 }
 
 function disableGoogleAnalytics(id) {
     window[`ga-disable-${id}`] = true;
+    lastTrackedLocation = null;
     deleteAnalyticsCookies(id);
 }
 
@@ -92,7 +109,7 @@ function applyStatisticsConsent(statistics) {
 }
 
 export function getStatisticsConsent() {
-    return readStoredConsent();
+    return readStoredConsent()?.statistics ?? null;
 }
 
 export function isAnalyticsConfigured() {
@@ -106,21 +123,24 @@ export function setStatisticsConsent(statistics) {
 
 export function initializeAnalyticsConsent() {
     const consent = readStoredConsent();
-
-    if (consent !== null) {
-        applyStatisticsConsent(consent);
-    }
+    applyStatisticsConsent(consent?.statistics ?? false);
 }
 
 export function trackPageView() {
     const id = measurementId();
+    const pageLocation = `${window.location.origin}${window.location.pathname}`;
 
-    if (!id || readStoredConsent() !== true || typeof window.gtag !== 'function') {
+    if (
+        !id
+        || readStoredConsent()?.statistics !== true
+        || typeof window.gtag !== 'function'
+        || pageLocation === lastTrackedLocation
+    ) {
         return;
     }
 
+    lastTrackedLocation = pageLocation;
     window.gtag('event', 'page_view', {
-        page_location: window.location.href,
-        page_title: document.title,
+        page_location: pageLocation,
     });
 }

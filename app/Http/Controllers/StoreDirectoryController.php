@@ -3,17 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Grocer;
-use App\Models\OfferSearchDocument;
+use App\Search\DatabaseOfferSearchEngine;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class StoreDirectoryController extends Controller
 {
-    public function __invoke(): Response
+    public function __invoke(DatabaseOfferSearchEngine $databaseSearch): Response
     {
-        $activeCounts = $this->activeOfferCounts();
+        $activeCounts = $databaseSearch->activeProductCountsByGrocer();
 
         return Inertia::render('Stores/Index', [
             'stores' => $this->stores($activeCounts),
@@ -23,32 +22,6 @@ class StoreDirectoryController extends Controller
                 'offerCount' => $activeCounts->sum(),
             ],
         ]);
-    }
-
-    /**
-     * @return Collection<string, int>
-     */
-    private function activeOfferCounts(): Collection
-    {
-        $groupExpression = $this->productGroupExpression();
-
-        return OfferSearchDocument::query()
-            ->selectRaw("grocer_slug, count(distinct {$groupExpression}) as offer_count")
-            ->where('active_from', '<=', now())
-            ->where('active_until', '>=', now())
-            ->whereHas('grocer', fn ($query) => $query->where('is_enabled', true))
-            ->groupBy('grocer_slug')
-            ->pluck('offer_count', 'grocer_slug')
-            ->map(fn (mixed $count): int => (int) $count);
-    }
-
-    private function productGroupExpression(): string
-    {
-        if (DB::connection()->getDriverName() === 'pgsql') {
-            return "coalesce('canonical_' || canonical_product_id::text, 'scraped_' || scraped_offer_id::text)";
-        }
-
-        return "coalesce(concat('canonical_', canonical_product_id), concat('scraped_', scraped_offer_id))";
     }
 
     /**

@@ -81,6 +81,28 @@ class OfferSearchPageTest extends TestCase
                 ->etc());
     }
 
+    public function test_it_groups_overlapping_paper_memberships_by_grocer_product_before_canonical_matching(): void
+    {
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
+        $product = GrocerProduct::factory()->for($grocer)->create([
+            'source_product_id' => '210617',
+            'name' => 'Faxe Kondi',
+        ]);
+
+        $this->offer($grocer, 'Faxe Kondi', 3.00, grocerProduct: $product);
+        $this->offer($grocer, 'Faxe Kondi', 3.00, grocerProduct: $product);
+
+        $this->get('/tilbud?q=faxe')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Offers/Index', false)
+                ->has('results.data', 1)
+                ->where('grocers.0.count', 1)
+                ->where('results.data.0.productOfferCount', 2)
+                ->where('results.data.0.productStoreCount', 1)
+                ->etc());
+    }
+
     public function test_it_keeps_canonical_and_unmatched_results_in_separate_groups_when_ids_overlap(): void
     {
         $grocer = Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
@@ -152,14 +174,14 @@ class OfferSearchPageTest extends TestCase
                 ->etc());
     }
 
-    private function offer(Grocer $grocer, string $title, float $price, ?CanonicalProduct $canonicalProduct = null): OfferSearchDocument
+    private function offer(Grocer $grocer, string $title, float $price, ?CanonicalProduct $canonicalProduct = null, ?GrocerProduct $grocerProduct = null): OfferSearchDocument
     {
         $batch = ImportBatch::factory()->for($grocer)->create();
         $paper = Paper::factory()->for($grocer)->for($batch)->create([
             'active_from' => now()->subDay(),
             'active_until' => now()->addWeek(),
         ]);
-        $product = GrocerProduct::factory()->for($grocer)->create([
+        $product = $grocerProduct ?? GrocerProduct::factory()->for($grocer)->create([
             'name' => $title,
         ]);
         $offer = ScrapedOffer::factory()->for($grocer)->for($batch)->for($paper)->for($product)->create([

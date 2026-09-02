@@ -1,0 +1,50 @@
+{
+    "catalog": {
+        "id": "week-36",
+        "label": "Uge 36",
+        "run_from": "2026-08-29T22:00:00+00:00",
+        "run_till": "2026-09-05T21:59:59+00:00",
+        "source_strategy": "rema_tjek_offer_match",
+        "fetched_offer_count": 2,
+        "matched_tjek_offer_count": 1,
+        "matched_product_count": 1,
+        "ambiguous_tjek_offer_count": 0,
+        "missing_tjek_offer_count": 1,
+        "resolved_product_conflict_count": 0
+    },
+    "offers": [
+        {
+            "tjek_offer": {
+                "id": "tjek-faxe",
+                "heading": "Faxe Kondi",
+                "catalog_page": 1
+            },
+            "rema_product": {
+                "id": 210617,
+                "name": "FAXE KONDI",
+                "underline": "33 CL. / LEMONADE",
+                "department": {"id": 8, "name": "Drikkevarer"},
+                "category": {"id": 81, "name": "Sodavand"},
+                "declaration": "Vand, kulsyre og naturlig aroma.",
+                "barcodes": ["5700000210617"],
+                "images": [{"large": "https://images.example/faxe.webp"}]
+            },
+            "advertised_price": {
+                "price": 3,
+                "compare_unit_price": 9.09,
+                "starting_at": "2026-09-03T00:00:00+00:00",
+                "ending_at": "2026-09-05T21:59:59+00:00"
+            },
+            "score": 94
+        }
+    ],
+    "issues": [
+        {
+            "code": "missing_rema_product",
+            "source_catalog_id": "week-36",
+            "source_offer_id": "tjek-plant",
+            "message": "No REMA product exists.",
+            "context": {"heading": "Orkidé"}
+        }
+    ]
+}

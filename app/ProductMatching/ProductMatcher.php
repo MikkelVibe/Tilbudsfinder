@@ -8,7 +8,9 @@ use App\Models\PriceObservation;
 use App\Models\ProductIdentifier;
 use App\Models\ProductMatch;
 use App\Models\ScrapedOffer;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class ProductMatcher
@@ -17,6 +19,17 @@ class ProductMatcher
      * @return array{matched: int, ambiguous: int, skipped: int, conflicts: int}
      */
     public function matchImportBatch(ImportBatch $batch): array
+    {
+        return Cache::lock('product-matching:canonical-identifiers', 150)->block(
+            10,
+            fn (): array => $this->matchImportBatchWhileLocked($batch),
+        );
+    }
+
+    /**
+     * @return array{matched: int, ambiguous: int, skipped: int, conflicts: int}
+     */
+    private function matchImportBatchWhileLocked(ImportBatch $batch): array
     {
         $result = ['matched' => 0, 'ambiguous' => 0, 'skipped' => 0, 'conflicts' => 0];
 
@@ -91,16 +104,17 @@ class ProductMatcher
             'warnings' => $warnings === [] ? null : $warnings,
         ]);
 
-        PriceObservation::create([
+        PriceObservation::firstOrCreate([
             'canonical_product_id' => $product->id,
-            'scraped_offer_id' => $offer->id,
             'grocer_id' => $offer->grocer_id,
             'price' => $offer->price,
             'unit_price' => $offer->unit_price,
             'currency' => $offer->currency,
+            'valid_from' => $this->sourceValidityDate($offer, 'starting_at') ?? $offer->paper?->active_from,
+            'valid_until' => $this->sourceValidityDate($offer, 'ending_at') ?? $offer->paper?->active_until,
+        ], [
+            'scraped_offer_id' => $offer->id,
             'observed_at' => $offer->created_at ?? now(),
-            'valid_from' => $offer->paper?->active_from,
-            'valid_until' => $offer->paper?->active_until,
         ]);
 
         $this->fillMissingProductFields($product, $offer);
@@ -120,6 +134,13 @@ class ProductMatcher
             'status' => 'active',
             'match_confidence' => 100,
         ]);
+    }
+
+    private function sourceValidityDate(ScrapedOffer $offer, string $key): ?CarbonImmutable
+    {
+        $value = Arr::get($offer->source_payload, "advertised_price.{$key}");
+
+        return is_string($value) && trim($value) !== '' ? CarbonImmutable::parse($value) : null;
     }
 
     private function fillMissingProductFields(CanonicalProduct $product, ScrapedOffer $offer): void
@@ -160,6 +181,7 @@ class ProductMatcher
 
         $barcodes = match ($offer->grocer?->slug) {
             'rema1000' => Arr::get($offer->source_payload, 'product_detail.bar_codes')
+                ?? Arr::get($offer->source_payload, 'rema_product.barcodes')
                 ?? Arr::get($offer->source_payload, 'catalog_product.bar_codes')
                 ?? Arr::get($offer->source_payload, 'algolia.bar_codes')
                 ?? [],
@@ -204,7 +226,9 @@ class ProductMatcher
     private function metadataString(ScrapedOffer $offer, string $key): ?string
     {
         $sourceKey = $key === 'brand' ? 'hf2' : $key;
-        $value = Arr::get($offer->source_payload, "catalog_product.{$sourceKey}") ?? Arr::get($offer->source_payload, "algolia.{$sourceKey}");
+        $value = Arr::get($offer->source_payload, "rema_product.{$sourceKey}")
+            ?? Arr::get($offer->source_payload, "catalog_product.{$sourceKey}")
+            ?? Arr::get($offer->source_payload, "algolia.{$sourceKey}");
 
         return is_string($value) && trim($value) !== '' ? $value : null;
     }

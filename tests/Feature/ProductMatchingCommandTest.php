@@ -10,11 +10,14 @@ use App\Jobs\MatchImportBatchProducts;
 use App\Models\CanonicalProduct;
 use App\Models\Grocer;
 use App\Models\ImportBatch;
+use App\Models\OfferSearchDocument;
 use App\Models\Paper;
 use App\Models\PriceObservation;
 use App\Models\ProductIdentifier;
 use App\Models\ScrapedOffer;
 use App\Normalization\DTO\ParsedOfferInput;
+use App\ProductMatching\ProductMatcher;
+use App\Search\OfferSearchDocumentBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -203,6 +206,52 @@ class ProductMatchingCommandTest extends TestCase
         $this->assertSame(1, CanonicalProduct::query()->count());
         $this->assertSame(1, ProductIdentifier::query()->count());
         $this->assertSame(1, PriceObservation::query()->count());
+    }
+
+    public function test_matching_job_refreshes_canonical_search_fields_for_the_current_batch(): void
+    {
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $batch = ImportBatch::factory()->for($grocer)->create(['status' => ImportBatchStatus::Succeeded]);
+        $paper = Paper::factory()->for($grocer)->for($batch)->create();
+        $offer = ScrapedOffer::factory()->for($grocer)->for($batch)->for($paper)->create([
+            'title' => 'LIMPAN',
+            'source_payload' => $this->sourcePayload(['7311070338188']),
+        ]);
+        $builder = new OfferSearchDocumentBuilder;
+        $builder->rebuildForImportBatch($batch);
+
+        $this->assertNull(OfferSearchDocument::query()->where('scraped_offer_id', $offer->id)->value('canonical_product_id'));
+
+        (new MatchImportBatchProducts($batch))->handle(new ProductMatcher, $builder);
+
+        $document = OfferSearchDocument::query()->where('scraped_offer_id', $offer->id)->firstOrFail();
+        $this->assertNotNull($document->canonical_product_id);
+        $this->assertSame('LIMPAN', $document->canonical_product_name);
+    }
+
+    public function test_matching_job_skips_a_superseded_reconciliation_batch(): void
+    {
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $oldBatch = ImportBatch::factory()->for($grocer)->create(['status' => ImportBatchStatus::Succeeded]);
+        $currentBatch = ImportBatch::factory()->for($grocer)->create(['status' => ImportBatchStatus::Succeeded]);
+        $paper = Paper::factory()->for($grocer)->for($currentBatch)->create();
+        $oldOffer = ScrapedOffer::factory()->for($grocer)->for($oldBatch)->for($paper)->create([
+            'source_payload' => $this->sourcePayload(['7311070338188']),
+        ]);
+
+        (new MatchImportBatchProducts($oldBatch))->handle(new ProductMatcher, new OfferSearchDocumentBuilder);
+
+        $this->assertNull($oldOffer->productMatch()->first());
+        $this->assertSame(0, CanonicalProduct::query()->count());
+    }
+
+    public function test_matching_queue_retry_windows_exceed_the_job_timeout(): void
+    {
+        $job = new MatchImportBatchProducts(new ImportBatch);
+
+        $this->assertGreaterThan($job->timeout, config('queue.connections.database.retry_after'));
+        $this->assertGreaterThan($job->timeout, config('queue.connections.redis.retry_after'));
+        $this->assertSame([5, 30, 90], $job->backoff);
     }
 
     /**

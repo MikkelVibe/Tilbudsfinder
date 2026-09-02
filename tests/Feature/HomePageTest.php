@@ -9,6 +9,7 @@ use App\Models\ImportBatch;
 use App\Models\Paper;
 use App\Models\ProductMatch;
 use App\Models\ScrapedOffer;
+use App\Search\OfferSearchDocumentBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -113,11 +114,13 @@ class HomePageTest extends TestCase
             'active_until' => now()->addDay(),
         ]);
 
-        ScrapedOffer::factory()
+        $offer = ScrapedOffer::factory()
             ->for($grocer)
             ->for($batch, 'importBatch')
             ->for($paper)
             ->create(['price' => 12.00]);
+
+        (new OfferSearchDocumentBuilder)->updateForOffer($offer);
 
         $this->get(route('home'))
             ->assertOk()

@@ -4,8 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\ScrapeJobStatus;
 use App\Http\Controllers\Controller;
-use App\Imports\Exceptions\DuplicatePaperImportException;
-use App\Imports\ImportPersistencePipeline;
 use App\Models\ScrapeJob;
 use App\Models\ScraperAgent;
 use App\Scrapers\DTO\RawPaperPayload;
@@ -113,7 +111,7 @@ class ScraperAgentController extends Controller
         ]);
     }
 
-    public function storeRawPayloads(Request $request, ScrapeJob $scrapeJob, ScraperRunService $scraperRunService, ImportPersistencePipeline $pipeline, ScrapeJobWorker $worker): JsonResponse
+    public function storeRawPayloads(Request $request, ScrapeJob $scrapeJob, ScraperRunService $scraperRunService, ScrapeJobWorker $worker): JsonResponse
     {
         $this->authorizeJob($request, $scrapeJob);
 
@@ -126,45 +124,32 @@ class ScraperAgentController extends Controller
         ]);
 
         $scraper = $scraperRunService->scraperFor($scrapeJob->grocer->slug);
-        $importedCount = 0;
-        $skippedDuplicateCount = 0;
+        $payloads = array_map(static fn (array $payload): RawPaperPayload => new RawPaperPayload(
+            sourceExternalId: $payload['source_external_id'],
+            rawPayload: $payload['raw_payload'],
+            title: $payload['title'] ?? null,
+            alreadyFetched: $payload['already_fetched'] ?? false,
+        ), $validated['payloads']);
 
         try {
-            foreach ($validated['payloads'] as $payload) {
-                if (($payload['already_fetched'] ?? false) === true) {
-                    $skippedDuplicateCount++;
+            $result = $scraperRunService->importPayloads(
+                grocer: $scrapeJob->grocer,
+                scraper: $scraper,
+                payloads: $payloads,
+                scrapeJob: $scrapeJob,
+            );
 
-                    continue;
-                }
-
-                try {
-                    $pipeline->persist(
-                        $scrapeJob->grocer,
-                        $scraper->parse(new RawPaperPayload(
-                            sourceExternalId: $payload['source_external_id'],
-                            rawPayload: $payload['raw_payload'],
-                            title: $payload['title'] ?? null,
-                        )),
-                        $scrapeJob,
-                    );
-
-                    $importedCount++;
-                } catch (DuplicatePaperImportException) {
-                    $skippedDuplicateCount++;
-                }
-            }
-
-            $status = $importedCount > 0 ? ScrapeJobStatus::Succeeded : ScrapeJobStatus::NoChanges;
+            $status = $result->importedPaperCount > 0 ? ScrapeJobStatus::Succeeded : ScrapeJobStatus::NoChanges;
             $worker->markSuccessful($scrapeJob, $status, [
-                'fetched_paper_count' => count($validated['payloads']),
-                'imported_paper_count' => $importedCount,
-                'skipped_duplicate_count' => $skippedDuplicateCount,
+                'fetched_paper_count' => $result->fetchedPaperCount,
+                'imported_paper_count' => $result->importedPaperCount,
+                'skipped_duplicate_count' => $result->skippedDuplicateCount,
             ]);
 
             return response()->json([
                 'status' => $status->value,
-                'imported_paper_count' => $importedCount,
-                'skipped_duplicate_count' => $skippedDuplicateCount,
+                'imported_paper_count' => $result->importedPaperCount,
+                'skipped_duplicate_count' => $result->skippedDuplicateCount,
             ]);
         } catch (Throwable $exception) {
             $worker->markFailedAttempt($scrapeJob, $exception);

@@ -182,7 +182,7 @@ class OfferDetailController extends Controller
             'grocer' => $offer->grocer?->name ?: 'Butik',
             'color' => $this->chartColors[0],
             'prices' => [[
-                'date' => ($offer->paper?->active_from ?: $offer->created_at)->toDateString(),
+                'date' => ($offer->paper?->active_from ?? $offer->created_at)->toDateString(),
                 'price' => (float) $offer->price,
             ]],
         ]];

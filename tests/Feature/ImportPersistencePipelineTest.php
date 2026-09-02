@@ -6,6 +6,7 @@ use App\Enums\GrocerHealthStatus;
 use App\Enums\ImportBatchStatus;
 use App\Enums\NormalizationStatus;
 use App\Enums\ScrapeJobStatus;
+use App\Imports\DTO\ImportIssueInput;
 use App\Imports\DTO\ParsedPaperInput;
 use App\Imports\Exceptions\DuplicatePaperImportException;
 use App\Imports\Exceptions\ImportPipelineException;
@@ -22,7 +23,6 @@ use App\Normalization\Enums\NormalizationIssueCode;
 use App\Search\OfferSearchDocumentBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
@@ -100,13 +100,17 @@ class ImportPersistencePipelineTest extends TestCase
         $this->assertSame(1, Paper::query()->where('source_external_id', 'paper-with-queue-failure')->count());
     }
 
-    public function test_it_does_not_fail_successful_import_when_search_document_rebuild_fails(): void
+    public function test_search_document_failure_rolls_back_rema_activation_and_preserves_previous_results(): void
     {
         Storage::fake('local');
-        Log::shouldReceive('warning')
-            ->with('Search document rebuild failed after successful import.', Mockery::type('array'))
-            ->once();
-        Log::shouldReceive('warning')->zeroOrMoreTimes();
+
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $pipeline = new ImportPersistencePipeline;
+        $firstBatch = $pipeline->persist($grocer, $this->paperInput(
+            $this->validOffers(10),
+            sourceExternalId: 'paper-with-index-failure',
+        ));
+        $paper = Paper::query()->where('source_external_id', 'paper-with-index-failure')->firstOrFail();
 
         $searchDocumentBuilder = Mockery::mock(OfferSearchDocumentBuilder::class);
         $searchDocumentBuilder
@@ -114,15 +118,28 @@ class ImportPersistencePipelineTest extends TestCase
             ->once()
             ->andThrow(new \RuntimeException('Index unavailable.'));
 
-        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
         $job = ScrapeJob::factory()->for($grocer)->create(['status' => ScrapeJobStatus::Running]);
-        $paperInput = $this->paperInput($this->validOffers(10), sourceExternalId: 'paper-with-index-failure');
+        $paperInput = new ParsedPaperInput(
+            sourceExternalId: 'paper-with-index-failure',
+            activeFrom: CarbonImmutable::parse('2026-05-28 00:00:00'),
+            activeUntil: CarbonImmutable::parse('2026-06-04 23:59:59'),
+            offers: $this->validOffers(10),
+            metadata: $this->remaMetadata(10, 10, 10),
+            reconcileExistingPaper: true,
+        );
 
-        $batch = (new ImportPersistencePipeline(searchDocumentBuilder: $searchDocumentBuilder))->persist($grocer, $paperInput, $job);
+        try {
+            (new ImportPersistencePipeline(searchDocumentBuilder: $searchDocumentBuilder))->persist($grocer, $paperInput, $job);
+            $this->fail('Expected index failure to fail the import.');
+        } catch (ImportPipelineException $exception) {
+            $this->assertSame('Index unavailable.', $exception->getMessage());
+        }
 
-        $this->assertSame(ImportBatchStatus::Succeeded, $batch->status);
-        $this->assertSame(ScrapeJobStatus::Succeeded, $job->refresh()->status);
-        $this->assertSame(GrocerHealthStatus::Healthy, $grocer->refresh()->health_status);
+        $this->assertSame(1, ImportBatch::query()->count());
+        $this->assertSame($firstBatch->id, $paper->refresh()->import_batch_id);
+        $this->assertSame(10, OfferSearchDocument::query()->count());
+        $this->assertSame(ScrapeJobStatus::Failed, $job->refresh()->status);
+        $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
         $this->assertSame(1, Paper::query()->where('source_external_id', 'paper-with-index-failure')->count());
     }
 
@@ -161,6 +178,178 @@ class ImportPersistencePipelineTest extends TestCase
         }
     }
 
+    public function test_it_reconciles_rema_paper_to_a_new_current_snapshot_and_logs_ignored_rows(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        CarbonImmutable::setTestNow('2026-09-03 12:00:00');
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $pipeline = new ImportPersistencePipeline;
+        $metadata = [
+            'source_strategy' => 'rema_tjek_offer_match',
+            'fetched_offer_count' => 1,
+            'matched_tjek_offer_count' => 1,
+            'ambiguous_tjek_offer_count' => 0,
+            'missing_tjek_offer_count' => 0,
+        ];
+
+        $first = new ParsedPaperInput(
+            sourceExternalId: 'week-36',
+            activeFrom: CarbonImmutable::parse('2026-08-30 00:00:00'),
+            activeUntil: CarbonImmutable::parse('2026-09-06 00:00:00'),
+            offers: [new ParsedOfferInput(
+                title: 'Old product',
+                price: 10,
+                packageText: '1 kg',
+                sourceOfferId: 'tjek-old',
+                sourceProductId: 'rema-old',
+            )],
+            metadata: $metadata,
+            reconcileExistingPaper: true,
+        );
+        $firstBatch = $pipeline->persist($grocer, $first);
+
+        $second = new ParsedPaperInput(
+            sourceExternalId: 'week-36',
+            activeFrom: CarbonImmutable::parse('2026-08-30 00:00:00'),
+            activeUntil: CarbonImmutable::parse('2026-09-06 00:00:00'),
+            offers: [
+                new ParsedOfferInput(
+                    title: 'New Thursday product',
+                    price: 12,
+                    packageText: '1 kg',
+                    sourceOfferId: 'tjek-new',
+                    sourceProductId: 'rema-new',
+                ),
+                new ParsedOfferInput(
+                    title: 'Invalid missing-ID product',
+                    price: 14,
+                    packageText: '1 kg',
+                    sourceOfferId: 'tjek-no-id',
+                ),
+            ],
+            issues: [new ImportIssueInput(
+                code: 'missing_rema_product',
+                message: 'Tjek offer has no REMA product.',
+                sourceCatalogId: 'week-36',
+                sourceOfferId: 'tjek-plant',
+            )],
+            metadata: [...$metadata, 'fetched_offer_count' => 2, 'missing_tjek_offer_count' => 1],
+            reconcileExistingPaper: true,
+        );
+        $secondBatch = $pipeline->persist($grocer, $second);
+
+        $paper = Paper::query()->where('source_external_id', 'week-36')->firstOrFail();
+        $this->assertSame(1, Paper::query()->count());
+        $this->assertSame(2, ImportBatch::query()->count());
+        $this->assertSame($secondBatch->id, $paper->import_batch_id);
+        $this->assertSame(0, ScrapedOffer::query()->where('import_batch_id', $firstBatch->id)->publiclyActive()->count());
+        $this->assertSame(1, ScrapedOffer::query()->where('import_batch_id', $secondBatch->id)->publiclyActive()->count());
+        $this->assertSame(1, OfferSearchDocument::query()->count());
+        $this->assertSame(2, $secondBatch->metadata['import_issue_count']);
+        $this->assertSame(
+            ['missing_rema_product', 'missing_rema_product_id'],
+            array_column($secondBatch->metadata['import_issues'], 'code'),
+        );
+        $this->assertSame(0, ScrapedOffer::query()->where('source_offer_id', 'tjek-no-id')->count());
+    }
+
+    public function test_low_rema_coverage_replaces_the_current_snapshot_and_logs_unmatched_rows(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        CarbonImmutable::setTestNow('2026-09-03 12:00:00');
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $pipeline = new ImportPersistencePipeline;
+        $currentBatch = $pipeline->persist($grocer, new ParsedPaperInput(
+            sourceExternalId: 'week-36',
+            activeFrom: CarbonImmutable::parse('2026-08-30 00:00:00'),
+            activeUntil: CarbonImmutable::parse('2026-09-06 00:00:00'),
+            offers: $this->validOffers(10),
+            metadata: $this->remaMetadata(10, 10, 10),
+            reconcileExistingPaper: true,
+        ));
+        $paper = Paper::query()->where('source_external_id', 'week-36')->firstOrFail();
+
+        $issues = array_map(
+            fn (int $number): ImportIssueInput => new ImportIssueInput(
+                code: 'missing_rema_product',
+                message: 'Tjek offer has no REMA product.',
+                sourceCatalogId: 'week-36',
+                sourceOfferId: 'missing-'.$number,
+            ),
+            range(1, 119),
+        );
+
+        $replacementBatch = $pipeline->persist($grocer, new ParsedPaperInput(
+            sourceExternalId: 'week-36',
+            activeFrom: CarbonImmutable::parse('2026-08-30 00:00:00'),
+            activeUntil: CarbonImmutable::parse('2026-09-06 00:00:00'),
+            offers: $this->validOffers(1),
+            issues: $issues,
+            metadata: $this->remaMetadata(120, 1, 1),
+            reconcileExistingPaper: true,
+        ));
+
+        $this->assertSame(ImportBatchStatus::Succeeded, $replacementBatch->status);
+        $this->assertSame(1, $replacementBatch->published_offer_count);
+        $this->assertSame(119, $replacementBatch->metadata['import_issue_count']);
+        $this->assertSame('missing_rema_product', $replacementBatch->metadata['import_issues'][0]['code']);
+        $this->assertSame($replacementBatch->id, $paper->refresh()->import_batch_id);
+        $this->assertSame(0, ScrapedOffer::query()->where('import_batch_id', $currentBatch->id)->publiclyActive()->count());
+        $this->assertSame(1, ScrapedOffer::query()->where('import_batch_id', $replacementBatch->id)->publiclyActive()->count());
+        $this->assertSame(1, OfferSearchDocument::query()->count());
+    }
+
+    public function test_zero_rema_coverage_is_logged_without_replacing_the_current_snapshot(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        CarbonImmutable::setTestNow('2026-09-03 12:00:00');
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $pipeline = new ImportPersistencePipeline;
+        $currentBatch = $pipeline->persist($grocer, new ParsedPaperInput(
+            sourceExternalId: 'week-36',
+            activeFrom: CarbonImmutable::parse('2026-08-30 00:00:00'),
+            activeUntil: CarbonImmutable::parse('2026-09-06 00:00:00'),
+            offers: $this->validOffers(10),
+            metadata: $this->remaMetadata(10, 10, 10),
+            reconcileExistingPaper: true,
+        ));
+
+        $issues = array_map(
+            fn (int $number): ImportIssueInput => new ImportIssueInput(
+                code: 'missing_rema_product',
+                message: 'Tjek offer has no REMA product.',
+                sourceCatalogId: 'week-36',
+                sourceOfferId: 'missing-'.$number,
+            ),
+            range(1, 120),
+        );
+
+        try {
+            $pipeline->persist($grocer, new ParsedPaperInput(
+                sourceExternalId: 'week-36',
+                activeFrom: CarbonImmutable::parse('2026-08-30 00:00:00'),
+                activeUntil: CarbonImmutable::parse('2026-09-06 00:00:00'),
+                offers: [],
+                issues: $issues,
+                metadata: $this->remaMetadata(120, 0, 0),
+                reconcileExistingPaper: true,
+            ));
+            $this->fail('Expected zero REMA coverage to fail the import.');
+        } catch (ImportPipelineException $exception) {
+            $this->assertSame('Import produced zero publishable offers.', $exception->getMessage());
+        }
+
+        $failedBatch = ImportBatch::query()->where('status', ImportBatchStatus::Failed)->firstOrFail();
+        $this->assertSame(0, $failedBatch->published_offer_count);
+        $this->assertSame(120, $failedBatch->metadata['import_issue_count']);
+        $this->assertSame($currentBatch->id, Paper::query()->where('source_external_id', 'week-36')->value('import_batch_id'));
+        $this->assertSame(10, ScrapedOffer::query()->publiclyActive()->count());
+        $this->assertSame(10, OfferSearchDocument::query()->count());
+    }
+
     /**
      * @param  list<ParsedOfferInput>  $offers
      */
@@ -196,5 +385,18 @@ class ImportPersistencePipelineTest extends TestCase
         }
 
         return $offers;
+    }
+
+    /** @return array<string, int|string> */
+    private function remaMetadata(int $fetched, int $matchedTjek, int $matchedProducts): array
+    {
+        return [
+            'source_strategy' => 'rema_tjek_offer_match',
+            'fetched_offer_count' => $fetched,
+            'matched_tjek_offer_count' => $matchedTjek,
+            'matched_product_count' => $matchedProducts,
+            'ambiguous_tjek_offer_count' => 0,
+            'missing_tjek_offer_count' => $fetched - $matchedTjek,
+        ];
     }
 }

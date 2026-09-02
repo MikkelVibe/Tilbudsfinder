@@ -3,16 +3,20 @@
 namespace Tests\Feature\Scrapers;
 
 use App\Enums\GrocerHealthStatus;
+use App\Enums\ImportBatchStatus;
 use App\Enums\ScrapeJobStatus;
 use App\Models\Grocer;
 use App\Models\ImportBatch;
 use App\Models\Paper;
+use App\Models\ScrapedOffer;
 use App\Models\ScrapeJob;
 use App\Models\ScraperAgent;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ScraperAgentApiTest extends TestCase
@@ -177,6 +181,54 @@ class ScraperAgentApiTest extends TestCase
         $this->assertSame(1, Paper::query()->count());
     }
 
+    public function test_agent_upload_imports_later_payloads_before_retrying_a_failed_paper(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-03 12:00:00');
+        Storage::fake('local');
+        Queue::fake();
+        $token = 'secret-token';
+        $agent = $this->agent($token);
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $job = ScrapeJob::factory()->for($grocer)->for($agent, 'scraperAgent')->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'scheduled_for' => now()->subMinute(),
+        ]);
+        $unmatchedPayload = $this->remaFixturePayload('paper-unmatched');
+        $unmatchedPayload['offers'] = [];
+        $unmatchedPayload['catalog']['matched_tjek_offer_count'] = 0;
+        $unmatchedPayload['catalog']['matched_product_count'] = 0;
+        $unmatchedPayload['catalog']['missing_tjek_offer_count'] = 2;
+        $validPayload = $this->remaFixturePayload('paper-valid');
+
+        $this->withToken($token)
+            ->postJson("/api/scraper-agent/jobs/{$job->id}/raw-payloads", [
+                'payloads' => [
+                    [
+                        'source_external_id' => 'paper-unmatched',
+                        'title' => 'Uge 36',
+                        'raw_payload' => json_encode($unmatchedPayload, JSON_THROW_ON_ERROR),
+                    ],
+                    [
+                        'source_external_id' => 'paper-valid',
+                        'title' => 'Uge 36 Indstik',
+                        'raw_payload' => json_encode($validPayload, JSON_THROW_ON_ERROR),
+                    ],
+                ],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonPath('status', 'retrying')
+            ->assertJsonPath('message', 'Paper paper-unmatched failed: Import produced zero publishable offers.');
+
+        $this->assertSame(ScrapeJobStatus::Retrying, $job->refresh()->status);
+        $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
+        $this->assertSame(ImportBatchStatus::Failed, ImportBatch::query()->where('source_external_id', 'paper-unmatched')->value('status'));
+        $successfulBatch = ImportBatch::query()->where('source_external_id', 'paper-valid')->firstOrFail();
+
+        $this->assertSame(ImportBatchStatus::Succeeded, $successfulBatch->status);
+        $this->assertSame(1, ScrapedOffer::query()->where('import_batch_id', $successfulBatch->id)->count());
+    }
+
     public function test_agent_can_upload_already_fetched_proof_without_importing(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 12:00:00');
@@ -315,6 +367,46 @@ class ScraperAgentApiTest extends TestCase
             && $request['message'] === 'Scraper [unsupported-grocer] is not supported.');
     }
 
+    public function test_agent_command_does_not_report_a_server_handled_upload_failure_twice(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+
+        Http::fake([
+            '*tilbud.test/api/scraper-agent/version' => Http::response([
+                'desired_version' => 'sha-123',
+                'compatible' => true,
+            ]),
+            '*tilbud.test/api/scraper-agent/heartbeat' => Http::response(['status' => 'ok']),
+            '*tilbud.test/api/scraper-agent/jobs/claim' => Http::response([
+                'job' => [
+                    'id' => 'job-123',
+                    'grocer' => 'netto',
+                    'attempt' => 1,
+                    'leased_until' => now()->addHour()->toIso8601String(),
+                ],
+            ]),
+            'squid-api.tjek.com/v2/catalogs*' => Http::response([
+                $this->nettoCatalog('weekly-paper', 'Uge 23', 12),
+            ]),
+            '*tilbud.test/api/scraper-agent/papers/exists' => Http::response([
+                'ids' => ['weekly-paper' => ['exists' => false]],
+            ]),
+            'squid-api.tjek.com/v2/offers?catalog_id=weekly-paper&offset=0&limit=100' => Http::response(array_map(fn (int $number): array => $this->nettoOffer($number), range(1, 12))),
+            '*tilbud.test/api/scraper-agent/jobs/job-123/raw-payloads' => Http::response([
+                'status' => 'retrying',
+                'message' => 'Paper weekly-paper failed validation.',
+            ], 422),
+            '*tilbud.test/api/scraper-agent/jobs/job-123/fail' => Http::response([
+                'status' => 'retrying',
+            ]),
+        ]);
+
+        $this->artisan('scraper-agent:work --server=https://tilbud.test --token=secret --app-version=sha-123')
+            ->assertFailed();
+
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/jobs/job-123/fail');
+    }
+
     public function test_agent_command_exits_before_claim_when_version_is_stale(): void
     {
         Http::fake([
@@ -353,6 +445,19 @@ class ScraperAgentApiTest extends TestCase
             'catalog' => $this->nettoCatalog('weekly-paper', 'Uge 23', 12),
             'offers' => array_map(fn (int $number): array => $this->nettoOffer($number), range(1, 12)),
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function remaFixturePayload(string $catalogId): array
+    {
+        $payload = json_decode(
+            file_get_contents(base_path('tests/Fixtures/scrapers/rema1000/uge-36-matched-flow.json')),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $payload['catalog']['id'] = $catalogId;
+
+        return $payload;
     }
 
     /**

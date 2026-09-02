@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Throwable;
 
-#[Signature('scraper-agent:work {--server= : The VPS base URL} {--token= : The scraper agent bearer token} {--app-version= : Current scraper agent image/app version} {--limit= : Limit discovered products/offers for live smoke tests} {--no-delay : Disable scraper politeness delays for tests only}')]
+#[Signature('scraper-agent:work {--server= : The VPS base URL} {--token= : The scraper agent bearer token} {--app-version= : Current scraper agent image/app version}')]
 #[Description('Poll the VPS for one scrape job, fetch raw payloads, and upload them')]
 class WorkRemoteScraperAgentCommand extends Command
 {
@@ -54,27 +54,36 @@ class WorkRemoteScraperAgentCommand extends Command
 
         $grocerKey = (string) $claim['grocer'];
         $jobId = (string) $claim['id'];
-        $limit = $this->option('limit') === null ? null : (int) $this->option('limit');
 
         $this->line("Claimed remote scrape job {$jobId} for {$grocerKey}.");
 
         try {
-            $scraper = $scraperRunService->scraperFor($grocerKey, ! (bool) $this->option('no-delay'));
+            $scraper = $scraperRunService->scraperFor($grocerKey);
             $progress = function (string $message): void {
                 $this->line($message);
             };
             $candidates = $scraper->discoverPapers($progress);
             $knownPapers = $this->knownPapers($client, $server, $grocerKey, array_map(fn ($candidate): string => $candidate->sourceExternalId, $candidates));
-            $payloads = $scraper->fetchPapers($candidates, $knownPapers, $limit > 0 ? $limit : null, $progress);
+            $payloads = $scraper->fetchPapers($candidates, $knownPapers, progress: $progress);
 
-            $response = $client->post($server."/api/scraper-agent/jobs/{$jobId}/raw-payloads", [
+            $uploadResponse = $client->post($server."/api/scraper-agent/jobs/{$jobId}/raw-payloads", [
                 'payloads' => array_map(fn ($payload): array => [
                     'source_external_id' => $payload->sourceExternalId,
                     'title' => $payload->title,
                     'raw_payload' => $payload->rawPayload,
                     'already_fetched' => $payload->alreadyFetched,
                 ], $payloads),
-            ])->throw()->json();
+            ]);
+            $uploadStatus = (string) $uploadResponse->json('status');
+
+            if ($uploadResponse->failed() && in_array($uploadStatus, ['retrying', 'failed'], true)) {
+                $message = (string) $uploadResponse->json('message');
+                $this->error("Remote scrape job {$jobId} failed: {$message}");
+
+                return self::FAILURE;
+            }
+
+            $response = $uploadResponse->throw()->json();
         } catch (Throwable $exception) {
             $client->post($server."/api/scraper-agent/jobs/{$jobId}/fail", [
                 'message' => $exception->getMessage(),

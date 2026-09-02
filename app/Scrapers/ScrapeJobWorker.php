@@ -36,7 +36,6 @@ class ScrapeJobWorker
         try {
             $result = $this->scraperRunService->run(
                 grocerKey: $job->grocer->slug,
-                sleepBetweenDetailRequests: true,
                 progress: $progress,
                 scrapeJob: $job,
                 skipKnown: true,

@@ -7,7 +7,7 @@ import CookieConsent from './Components/CookieConsent.vue';
 import { initializeAnalyticsConsent, trackPageView } from './Support/analyticsConsent';
 
 initializeAnalyticsConsent();
-router.on('finish', trackPageView);
+router.on('navigate', trackPageView);
 
 createInertiaApp({
     title: (title) => (title ? `${title} - Tilbudsfinder` : 'Tilbudsfinder'),

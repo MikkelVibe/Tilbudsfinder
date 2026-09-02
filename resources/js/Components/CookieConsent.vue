@@ -42,13 +42,21 @@ onMounted(() => {
                     <p class="mb-2 text-xs font-extrabold uppercase tracking-[0.2em] text-[#b3261e]">Dit valg</p>
                     <h2 id="cookie-consent-title" class="font-serif text-2xl font-bold text-[#173124]">Må vi bruge statistik?</h2>
                     <p class="mt-3 text-sm leading-6 text-[#33473d]">
-                        Vi bruger Google Analytics til at forstå, hvordan Tilbudsfinder bliver brugt. Statistik indlæses kun, hvis du accepterer. Vi gemmer altid dit valg lokalt i din browser, så vi kan huske det.
+                        Tilbudsfinder vil bruge Google Analytics til besøgsstatistik og forbedring af siden. Hvis du accepterer, modtager Google din IP-adresse, oplysninger om browser og enhed, et tilfældigt cookie-id og hvilke sider du besøger. Tilbudsfinder sender ikke søgeord eller andre URL-parametre. Statistik indlæses først, når du accepterer.
                     </p>
                     <details class="mt-3 text-sm text-[#33473d]">
                         <summary class="cursor-pointer font-bold underline decoration-2 underline-offset-4">Se detaljer</summary>
-                        <p class="mt-2 leading-6">
-                            Udbyder: Google. Formål: besøgsstatistik og forbedring af siden. Google Analytics kan sætte cookies som <code>_ga</code> og <code>_ga_TJ3MBH96Q0</code>. Du kan til enhver tid ændre eller trække dit valg tilbage via “Cookieindstillinger”.
-                        </p>
+                        <div class="mt-2 space-y-2 leading-6">
+                            <p>
+                                Google Analytics bruger førstepartscookies <code>_ga</code> og <code>_ga_*</code> til at skelne mellem besøgende og bevare sessionsstatus. De gemmes i højst 12 måneder. Oplysningerne sendes til og behandles af Google som leverandør af analysetjenesten.
+                            </p>
+                            <p>
+                                Dit valg gemmes lokalt i browseren i 12 måneder. Du kan til enhver tid ændre eller trække det tilbage via “Cookieindstillinger”. Når du afviser eller trækker samtykket tilbage, deaktiverer vi Google Analytics og sletter Analytics-cookies fra siden.
+                            </p>
+                            <p>
+                                Læs mere i <a href="https://policies.google.com/privacy?hl=da" class="font-bold underline decoration-2 underline-offset-4" target="_blank" rel="noopener noreferrer">Googles privatlivspolitik</a>.
+                            </p>
+                        </div>
                     </details>
                 </div>
 
