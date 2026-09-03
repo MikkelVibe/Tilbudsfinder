@@ -2,10 +2,8 @@
 
 namespace App\Imports;
 
-use App\Enums\GrocerHealthStatus;
 use App\Enums\ImportBatchStatus;
 use App\Enums\NormalizationStatus;
-use App\Enums\ScrapeJobStatus;
 use App\Imports\DTO\ParsedPaperInput;
 use App\Imports\Exceptions\DuplicatePaperImportException;
 use App\Imports\Exceptions\ImportPipelineException;
@@ -21,6 +19,7 @@ use App\Normalization\DTO\NormalizationIssue;
 use App\Normalization\DTO\NormalizedOffer;
 use App\Normalization\Enums\NormalizedOfferStatus;
 use App\Normalization\OfferNormalizer;
+use App\Scrapers\Exceptions\StaleScrapeJobAttemptException;
 use App\Search\OfferSearchDocumentBuilder;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
@@ -46,6 +45,8 @@ class ImportPersistencePipeline
             $this->validateInput($grocer, $paperInput);
 
             $batch = DB::transaction(function () use ($grocer, $paperInput, $scrapeJob): ImportBatch {
+                $this->lockActiveScrapeJobAttemptOrFail($scrapeJob);
+
                 $batch = ImportBatch::create([
                     'grocer_id' => $grocer->id,
                     'scrape_job_id' => $scrapeJob?->id,
@@ -131,17 +132,6 @@ class ImportPersistencePipeline
 
                 $this->searchDocumentBuilder->rebuildForImportBatch($batch);
 
-                $grocer->update([
-                    'health_status' => GrocerHealthStatus::Healthy,
-                    'last_success_at' => now(),
-                ]);
-
-                $scrapeJob?->update([
-                    'status' => ScrapeJobStatus::Succeeded,
-                    'finished_at' => now(),
-                    'failure_reason' => null,
-                ]);
-
                 return $batch->refresh();
             });
 
@@ -152,25 +142,36 @@ class ImportPersistencePipeline
             $this->dispatchProductMatching($batch);
 
             return $batch;
-        } catch (DuplicatePaperImportException $exception) {
+        } catch (DuplicatePaperImportException|StaleScrapeJobAttemptException $exception) {
             throw $exception;
         } catch (Throwable $exception) {
-            $scrapeJob?->update([
-                'status' => ScrapeJobStatus::Failed,
-                'finished_at' => now(),
-                'failure_reason' => $exception->getMessage(),
-            ]);
-
-            $grocer->update([
-                'health_status' => GrocerHealthStatus::Failing,
-                'last_failure_at' => now(),
-            ]);
-
             if ($exception instanceof ImportPipelineException) {
                 throw $exception;
             }
 
             throw new ImportPipelineException($exception->getMessage(), previous: $exception);
+        }
+    }
+
+    private function lockActiveScrapeJobAttemptOrFail(?ScrapeJob $expectedJob): void
+    {
+        if ($expectedJob === null) {
+            return;
+        }
+
+        $currentJob = ScrapeJob::query()
+            ->whereKey($expectedJob->id)
+            ->lockForUpdate()
+            ->first();
+
+        if ($currentJob === null
+            || $expectedJob->scraper_agent_id === null
+            || ! $currentJob->isActiveAttempt(
+                $expectedJob->scraper_agent_id,
+                $expectedJob->attempt,
+                $expectedJob->status,
+            )) {
+            throw new StaleScrapeJobAttemptException;
         }
     }
 

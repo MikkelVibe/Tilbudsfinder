@@ -39,7 +39,11 @@ class RunScraperCommandTest extends TestCase
         Storage::fake('local');
         Http::preventStrayRequests();
         $this->fakeRemaResponses(['weekly-paper' => range(1, 10), 'active-insert' => range(11, 20)]);
-        Grocer::factory()->create(['slug' => 'rema1000', 'name' => 'REMA 1000']);
+        $grocer = Grocer::factory()->create([
+            'slug' => 'rema1000',
+            'name' => 'REMA 1000',
+            'health_status' => GrocerHealthStatus::Failing,
+        ]);
 
         $this->artisan('scraper:run rema1000')
             ->expectsOutput('Scraper [rema1000] completed.')
@@ -51,6 +55,8 @@ class RunScraperCommandTest extends TestCase
         $this->assertSame(2, ImportBatch::query()->count());
         $this->assertSame(2, Paper::query()->count());
         $this->assertSame(20, Paper::query()->withCount('scrapedOffers')->get()->sum('scraped_offers_count'));
+        $this->assertSame(GrocerHealthStatus::Healthy, $grocer->refresh()->health_status);
+        $this->assertNotNull($grocer->last_success_at);
     }
 
     public function test_it_runs_netto_scraper_and_persists_active_papers(): void

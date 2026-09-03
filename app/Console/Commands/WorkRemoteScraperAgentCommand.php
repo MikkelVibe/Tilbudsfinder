@@ -54,6 +54,7 @@ class WorkRemoteScraperAgentCommand extends Command
 
         $grocerKey = (string) $claim['grocer'];
         $jobId = (string) $claim['id'];
+        $attempt = (int) $claim['attempt'];
 
         $this->line("Claimed remote scrape job {$jobId} for {$grocerKey}.");
 
@@ -67,6 +68,7 @@ class WorkRemoteScraperAgentCommand extends Command
             $payloads = $scraper->fetchPapers($candidates, $knownPapers, progress: $progress);
 
             $uploadResponse = $client->post($server."/api/scraper-agent/jobs/{$jobId}/raw-payloads", [
+                'attempt' => $attempt,
                 'payloads' => array_map(fn ($payload): array => [
                     'source_external_id' => $payload->sourceExternalId,
                     'title' => $payload->title,
@@ -75,6 +77,12 @@ class WorkRemoteScraperAgentCommand extends Command
                 ], $payloads),
             ]);
             $uploadStatus = (string) $uploadResponse->json('status');
+
+            if ($uploadStatus === 'stale_attempt') {
+                $this->error("Remote scrape job {$jobId} attempt {$attempt} is no longer current.");
+
+                return self::FAILURE;
+            }
 
             if ($uploadResponse->failed() && in_array($uploadStatus, ['retrying', 'failed'], true)) {
                 $message = (string) $uploadResponse->json('message');
@@ -85,9 +93,18 @@ class WorkRemoteScraperAgentCommand extends Command
 
             $response = $uploadResponse->throw()->json();
         } catch (Throwable $exception) {
-            $client->post($server."/api/scraper-agent/jobs/{$jobId}/fail", [
+            $failureResponse = $client->post($server."/api/scraper-agent/jobs/{$jobId}/fail", [
+                'attempt' => $attempt,
                 'message' => $exception->getMessage(),
-            ])->throw();
+            ]);
+
+            if ($failureResponse->json('status') === 'stale_attempt') {
+                $this->error("Remote scrape job {$jobId} attempt {$attempt} is no longer current.");
+
+                return self::FAILURE;
+            }
+
+            $failureResponse->throw();
 
             $this->error("Remote scrape job {$jobId} failed: {$exception->getMessage()}");
 

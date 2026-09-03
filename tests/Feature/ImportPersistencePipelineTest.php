@@ -20,6 +20,10 @@ use App\Models\ScrapedOffer;
 use App\Models\ScrapeJob;
 use App\Normalization\DTO\ParsedOfferInput;
 use App\Normalization\Enums\NormalizationIssueCode;
+use App\Scrapers\DTO\RawPaperPayload;
+use App\Scrapers\Exceptions\StaleScrapeJobAttemptException;
+use App\Scrapers\GrocerScraper;
+use App\Scrapers\ScraperRunService;
 use App\Search\OfferSearchDocumentBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -36,8 +40,15 @@ class ImportPersistencePipelineTest extends TestCase
     {
         Storage::fake('local');
 
-        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
-        $job = ScrapeJob::factory()->for($grocer)->create(['status' => ScrapeJobStatus::Running]);
+        $grocer = Grocer::factory()->create([
+            'slug' => 'rema1000',
+            'health_status' => GrocerHealthStatus::Failing,
+        ]);
+        $job = ScrapeJob::factory()->for($grocer)->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addHour(),
+        ]);
         $paperInput = $this->paperInput([
             ...$this->validOffers(10),
             new ParsedOfferInput(title: 'Mystery product', price: '20', packageText: 'ukendt størrelse'),
@@ -65,9 +76,9 @@ class ImportPersistencePipelineTest extends TestCase
         $this->assertSame(NormalizationStatus::Partial, $partialOffer->normalization_status);
         $this->assertNull($partialOffer->unit_price);
 
-        $this->assertSame(ScrapeJobStatus::Succeeded, $job->refresh()->status);
-        $this->assertSame(GrocerHealthStatus::Healthy, $grocer->refresh()->health_status);
-        $this->assertNotNull($grocer->last_success_at);
+        $this->assertSame(ScrapeJobStatus::Running, $job->refresh()->status);
+        $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
+        $this->assertNull($grocer->last_success_at);
     }
 
     public function test_it_rejects_duplicate_paper_external_ids_before_creating_a_batch(): void
@@ -83,6 +94,110 @@ class ImportPersistencePipelineTest extends TestCase
             $this->fail('Expected duplicate paper exception.');
         } catch (DuplicatePaperImportException) {
             $this->assertSame(1, ImportBatch::query()->count());
+        }
+    }
+
+    public function test_stale_scrape_job_attempt_cannot_persist_any_import_side_effects(): void
+    {
+        Storage::fake('local');
+
+        $grocer = Grocer::factory()->create([
+            'health_status' => GrocerHealthStatus::Failing,
+        ]);
+        $job = ScrapeJob::factory()->for($grocer)->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addHour(),
+            'context' => ['attempt' => 1],
+        ]);
+        $staleAttempt = $job->fresh();
+
+        $job->update([
+            'attempt' => 2,
+            'context' => ['attempt' => 2],
+        ]);
+
+        try {
+            (new ImportPersistencePipeline)->persist(
+                $grocer,
+                $this->paperInput($this->validOffers(10), rawPayload: '{"paper":"stale"}'),
+                $staleAttempt,
+            );
+            $this->fail('Expected stale scrape job attempt exception.');
+        } catch (StaleScrapeJobAttemptException) {
+            $this->assertSame(0, ImportBatch::query()->count());
+            $this->assertSame(0, Paper::query()->count());
+            $this->assertSame(0, ScrapedOffer::query()->count());
+            $this->assertSame(0, OfferSearchDocument::query()->count());
+            $this->assertSame([], Storage::disk('local')->allFiles('imports/raw'));
+            $this->assertSame(['attempt' => 2], $job->refresh()->context);
+            $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
+        }
+    }
+
+    public function test_reassignment_between_papers_preserves_the_first_paper_and_stops_the_run(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+
+        $grocer = Grocer::factory()->create([
+            'slug' => 'rema1000',
+            'health_status' => GrocerHealthStatus::Stale,
+        ]);
+        $job = ScrapeJob::factory()->for($grocer)->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addHour(),
+            'context' => ['attempt' => 1],
+        ]);
+        $pipeline = new class($job) extends ImportPersistencePipeline
+        {
+            public int $callCount = 0;
+
+            public function __construct(private readonly ScrapeJob $job)
+            {
+                parent::__construct();
+            }
+
+            public function persist(Grocer $grocer, ParsedPaperInput $paperInput, ?ScrapeJob $scrapeJob = null): ImportBatch
+            {
+                $this->callCount++;
+                $batch = parent::persist($grocer, $paperInput, $scrapeJob);
+
+                if ($this->callCount === 1) {
+                    ScrapeJob::query()->whereKey($this->job->id)->update([
+                        'attempt' => 2,
+                        'context' => ['attempt' => 2],
+                    ]);
+                }
+
+                return $batch;
+            }
+        };
+        $scraper = Mockery::mock(GrocerScraper::class);
+        $scraper->shouldReceive('grocerKey')->andReturn('rema1000');
+        $scraper->shouldReceive('parse')->twice()->andReturnUsing(
+            fn (RawPaperPayload $payload): ParsedPaperInput => $this->paperInput(
+                $this->validOffers(10),
+                sourceExternalId: $payload->sourceExternalId,
+            ),
+        );
+        $payloads = [
+            new RawPaperPayload('paper-one', '{}'),
+            new RawPaperPayload('paper-two', '{}'),
+            new RawPaperPayload('paper-three', '{}'),
+        ];
+
+        try {
+            (new ScraperRunService($pipeline))->importPayloads($grocer, $scraper, $payloads, scrapeJob: $job);
+            $this->fail('Expected stale scrape job attempt exception.');
+        } catch (StaleScrapeJobAttemptException) {
+            $this->assertSame(2, $pipeline->callCount);
+            $this->assertSame(1, ImportBatch::query()->count());
+            $this->assertSame(['paper-one'], Paper::query()->pluck('source_external_id')->all());
+            $this->assertSame(10, ScrapedOffer::query()->count());
+            $this->assertSame(['attempt' => 2], $job->refresh()->context);
+            $this->assertSame(GrocerHealthStatus::Stale, $grocer->refresh()->health_status);
         }
     }
 
@@ -118,7 +233,11 @@ class ImportPersistencePipelineTest extends TestCase
             ->once()
             ->andThrow(new \RuntimeException('Index unavailable.'));
 
-        $job = ScrapeJob::factory()->for($grocer)->create(['status' => ScrapeJobStatus::Running]);
+        $job = ScrapeJob::factory()->for($grocer)->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addHour(),
+        ]);
         $paperInput = new ParsedPaperInput(
             sourceExternalId: 'paper-with-index-failure',
             activeFrom: CarbonImmutable::parse('2026-05-28 00:00:00'),
@@ -138,30 +257,40 @@ class ImportPersistencePipelineTest extends TestCase
         $this->assertSame(1, ImportBatch::query()->count());
         $this->assertSame($firstBatch->id, $paper->refresh()->import_batch_id);
         $this->assertSame(10, OfferSearchDocument::query()->count());
-        $this->assertSame(ScrapeJobStatus::Failed, $job->refresh()->status);
-        $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
+        $this->assertSame(ScrapeJobStatus::Running, $job->refresh()->status);
+        $this->assertSame(GrocerHealthStatus::Healthy, $grocer->refresh()->health_status);
+        $this->assertNull($grocer->last_failure_at);
         $this->assertSame(1, Paper::query()->where('source_external_id', 'paper-with-index-failure')->count());
     }
 
     public function test_it_fails_before_batch_when_parsed_offer_count_is_below_minimum(): void
     {
         $grocer = Grocer::factory()->create();
-        $job = ScrapeJob::factory()->for($grocer)->create(['status' => ScrapeJobStatus::Running]);
+        $job = ScrapeJob::factory()->for($grocer)->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addHour(),
+        ]);
 
         try {
             (new ImportPersistencePipeline)->persist($grocer, $this->paperInput($this->validOffers(9)), $job);
             $this->fail('Expected pipeline exception.');
         } catch (ImportPipelineException) {
             $this->assertSame(0, ImportBatch::query()->count());
-            $this->assertSame(ScrapeJobStatus::Failed, $job->refresh()->status);
-            $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
+            $this->assertSame(ScrapeJobStatus::Running, $job->refresh()->status);
+            $this->assertSame(GrocerHealthStatus::Healthy, $grocer->refresh()->health_status);
+            $this->assertNull($grocer->last_failure_at);
         }
     }
 
     public function test_it_fails_batch_when_zero_offers_are_publishable(): void
     {
         $grocer = Grocer::factory()->create();
-        $job = ScrapeJob::factory()->for($grocer)->create(['status' => ScrapeJobStatus::Running]);
+        $job = ScrapeJob::factory()->for($grocer)->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addHour(),
+        ]);
         $offers = array_fill(0, 10, new ParsedOfferInput(title: 'App-only offer', price: '10', isConditional: true));
 
         try {
@@ -174,7 +303,9 @@ class ImportPersistencePipelineTest extends TestCase
             $this->assertSame(0, $batch->published_offer_count);
             $this->assertSame(10, $batch->normalization_failure_count);
             $this->assertSame(10, NormalizationFailure::query()->where('code', NormalizationIssueCode::ConditionalOffer->value)->count());
-            $this->assertSame(ScrapeJobStatus::Failed, $job->refresh()->status);
+            $this->assertSame(ScrapeJobStatus::Running, $job->refresh()->status);
+            $this->assertSame(GrocerHealthStatus::Healthy, $grocer->refresh()->health_status);
+            $this->assertNull($grocer->last_failure_at);
         }
     }
 

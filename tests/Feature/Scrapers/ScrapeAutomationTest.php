@@ -243,6 +243,68 @@ class ScrapeAutomationTest extends TestCase
         ], $claimedJob->refresh()->context);
     }
 
+    public function test_beginning_an_upload_fences_and_extends_the_active_attempt(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $agent = ScraperAgent::factory()->create();
+        $job = ScrapeJob::factory()->for($grocer)->for($agent, 'scraperAgent')->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addMinute(),
+        ]);
+
+        $uploadingJob = app(ScrapeJobWorker::class)->beginUpload($job, $agent, 1);
+
+        $this->assertNotNull($uploadingJob);
+        $this->assertSame(ScrapeJobStatus::Uploading, $uploadingJob->status);
+        $this->assertSame('2026-06-01 15:00:00', $uploadingJob->leased_until->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-06-01 12:00:00', $uploadingJob->payload_received_at->format('Y-m-d H:i:s'));
+    }
+
+    public function test_stale_completion_cannot_overwrite_a_reclaimed_attempt(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
+        $agent = ScraperAgent::factory()->create();
+        $job = ScrapeJob::factory()->for($grocer)->for($agent, 'scraperAgent')->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'leased_until' => now()->addHours(3),
+        ]);
+        $worker = app(ScrapeJobWorker::class);
+        $uploadingJob = $worker->beginUpload($job, $agent, 1);
+
+        $this->assertNotNull($uploadingJob);
+
+        ScrapeJob::query()->whereKey($job->id)->update([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 2,
+            'leased_until' => now()->addHours(3),
+        ]);
+
+        $this->assertFalse($worker->markSuccessful(
+            $uploadingJob,
+            ScrapeJobStatus::Succeeded,
+            ['fetched_paper_count' => 1],
+            expectedAttempt: 1,
+            expectedStatus: ScrapeJobStatus::Uploading,
+        ));
+        $this->assertFalse($worker->markFailed(
+            $uploadingJob,
+            'Late failure from attempt one.',
+            expectedAttempt: 1,
+            expectedStatus: ScrapeJobStatus::Uploading,
+        ));
+
+        $job->refresh();
+
+        $this->assertSame(ScrapeJobStatus::Running, $job->status);
+        $this->assertSame(2, $job->attempt);
+        $this->assertNull($job->failure_reason);
+        $this->assertNull($grocer->refresh()->last_failure_at);
+    }
+
     public function test_worker_marks_failure_as_failed_and_stale_when_retry_would_cross_midnight(): void
     {
         CarbonImmutable::setTestNow('2026-06-01 21:30:00');

@@ -156,10 +156,12 @@ class ScraperAgentApiTest extends TestCase
             'status' => ScrapeJobStatus::Running,
             'attempt' => 1,
             'scheduled_for' => now()->subMinute(),
+            'leased_until' => now()->addHours(3),
         ]);
 
         $this->withToken($token)
             ->postJson("/api/scraper-agent/jobs/{$job->id}/raw-payloads", [
+                'attempt' => 1,
                 'payloads' => [[
                     'source_external_id' => 'weekly-paper',
                     'title' => 'Uge 23',
@@ -193,6 +195,7 @@ class ScraperAgentApiTest extends TestCase
             'status' => ScrapeJobStatus::Running,
             'attempt' => 1,
             'scheduled_for' => now()->subMinute(),
+            'leased_until' => now()->addHours(3),
         ]);
         $unmatchedPayload = $this->remaFixturePayload('paper-unmatched');
         $unmatchedPayload['offers'] = [];
@@ -203,6 +206,7 @@ class ScraperAgentApiTest extends TestCase
 
         $this->withToken($token)
             ->postJson("/api/scraper-agent/jobs/{$job->id}/raw-payloads", [
+                'attempt' => 1,
                 'payloads' => [
                     [
                         'source_external_id' => 'paper-unmatched',
@@ -245,10 +249,12 @@ class ScraperAgentApiTest extends TestCase
             'status' => ScrapeJobStatus::Running,
             'attempt' => 1,
             'scheduled_for' => now()->subMinute(),
+            'leased_until' => now()->addHours(3),
         ]);
 
         $this->withToken($token)
             ->postJson("/api/scraper-agent/jobs/{$job->id}/raw-payloads", [
+                'attempt' => 1,
                 'payloads' => [[
                     'source_external_id' => 'weekly-paper',
                     'title' => 'Uge 23',
@@ -280,6 +286,7 @@ class ScraperAgentApiTest extends TestCase
 
         $this->withToken($token)
             ->postJson("/api/scraper-agent/jobs/{$job->id}/fail", [
+                'attempt' => 1,
                 'message' => 'Laptop fetch failed.',
             ])
             ->assertOk()
@@ -291,6 +298,90 @@ class ScraperAgentApiTest extends TestCase
         $this->assertSame('Laptop fetch failed.', $job->failure_reason);
         $this->assertSame('2026-06-01 12:30:00', $job->scheduled_for->format('Y-m-d H:i:s'));
         $this->assertSame(GrocerHealthStatus::Failing, $grocer->refresh()->health_status);
+    }
+
+    public function test_agent_cannot_upload_or_fail_a_newer_job_attempt(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $token = 'secret-token';
+        $agent = $this->agent($token);
+        $grocer = Grocer::factory()->create(['slug' => 'netto']);
+        $job = ScrapeJob::factory()->for($grocer)->for($agent, 'scraperAgent')->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 2,
+            'scheduled_for' => now()->subMinute(),
+            'leased_until' => now()->addHours(3),
+        ]);
+
+        $this->withToken($token)
+            ->postJson("/api/scraper-agent/jobs/{$job->id}/raw-payloads", [
+                'attempt' => 1,
+                'payloads' => [[
+                    'source_external_id' => 'stale-paper',
+                    'title' => 'Stale paper',
+                    'raw_payload' => json_encode($this->nettoPaperPayload(), JSON_THROW_ON_ERROR),
+                ]],
+            ])
+            ->assertConflict()
+            ->assertJsonPath('status', 'stale_attempt');
+
+        $this->withToken($token)
+            ->postJson("/api/scraper-agent/jobs/{$job->id}/fail", [
+                'attempt' => 1,
+                'message' => 'Late failure from attempt one.',
+            ])
+            ->assertConflict()
+            ->assertJsonPath('status', 'stale_attempt');
+
+        $otherToken = 'other-secret-token';
+        ScraperAgent::factory()->create([
+            'slug' => 'other-agent',
+            'token_hash' => hash('sha256', $otherToken),
+        ]);
+
+        $this->withToken($otherToken)
+            ->postJson("/api/scraper-agent/jobs/{$job->id}/fail", [
+                'attempt' => 2,
+                'message' => 'Failure from the wrong agent.',
+            ])
+            ->assertConflict()
+            ->assertJsonPath('status', 'stale_attempt');
+
+        $job->refresh();
+
+        $this->assertSame(ScrapeJobStatus::Running, $job->status);
+        $this->assertSame(2, $job->attempt);
+        $this->assertNull($job->failure_reason);
+        $this->assertSame(0, ImportBatch::query()->count());
+    }
+
+    public function test_agent_cannot_upload_after_its_lease_expires(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        $token = 'secret-token';
+        $agent = $this->agent($token);
+        $grocer = Grocer::factory()->create(['slug' => 'netto']);
+        $job = ScrapeJob::factory()->for($grocer)->for($agent, 'scraperAgent')->create([
+            'status' => ScrapeJobStatus::Running,
+            'attempt' => 1,
+            'scheduled_for' => now()->subMinute(),
+            'leased_until' => now()->subSecond(),
+        ]);
+
+        $this->withToken($token)
+            ->postJson("/api/scraper-agent/jobs/{$job->id}/raw-payloads", [
+                'attempt' => 1,
+                'payloads' => [[
+                    'source_external_id' => 'expired-paper',
+                    'title' => 'Expired paper',
+                    'raw_payload' => json_encode($this->nettoPaperPayload(), JSON_THROW_ON_ERROR),
+                ]],
+            ])
+            ->assertConflict()
+            ->assertJsonPath('status', 'stale_attempt');
+
+        $this->assertSame(ScrapeJobStatus::Running, $job->refresh()->status);
+        $this->assertSame(0, ImportBatch::query()->count());
     }
 
     public function test_agent_command_claims_fetches_and_uploads_remote_job(): void
@@ -339,6 +430,7 @@ class ScraperAgentApiTest extends TestCase
             && $request['grocer'] === 'netto'
             && $request['ids'] === ['weekly-paper']);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/jobs/job-123/raw-payloads'
+            && $request['attempt'] === 1
             && count($request['payloads']) === 1
             && $request['payloads'][0]['source_external_id'] === 'weekly-paper');
     }
@@ -370,6 +462,7 @@ class ScraperAgentApiTest extends TestCase
 
         Http::assertSentCount(4);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/jobs/job-123/fail'
+            && $request['attempt'] === 1
             && $request['message'] === 'Scraper [unsupported-grocer] is not supported.');
     }
 

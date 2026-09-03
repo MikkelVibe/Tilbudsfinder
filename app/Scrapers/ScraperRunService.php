@@ -16,6 +16,7 @@ use App\Scrapers\Dagrofa\SparScraper;
 use App\Scrapers\DTO\RawPaperPayload;
 use App\Scrapers\DTO\ScraperRunResult;
 use App\Scrapers\Exceptions\ScraperRunException;
+use App\Scrapers\Exceptions\StaleScrapeJobAttemptException;
 use App\Scrapers\Foetex\FoetexScraper;
 use App\Scrapers\Nemlig\NemligScraper;
 use App\Scrapers\Netto\NettoScraper;
@@ -72,6 +73,8 @@ class ScraperRunService
             } catch (DuplicatePaperImportException) {
                 $skippedDuplicateCount++;
                 $this->progress($progress, "Skipped duplicate paper {$payload->sourceExternalId}.");
+            } catch (StaleScrapeJobAttemptException $exception) {
+                throw $exception;
             } catch (Throwable $exception) {
                 report($exception);
 
@@ -81,30 +84,32 @@ class ScraperRunService
             }
         }
 
-        if ($failures !== []) {
-            $scrapeJob?->update([
-                'context' => [
-                    ...($scrapeJob->context ?? []),
-                    'fetched_paper_count' => count($payloads),
-                    'imported_paper_count' => $importedCount,
-                    'skipped_duplicate_count' => $skippedDuplicateCount,
-                ],
-            ]);
-
-            $grocer->update([
-                'health_status' => GrocerHealthStatus::Failing,
-                'last_failure_at' => now(),
-            ]);
-
-            throw new ScraperRunException(implode(' ', $failures));
-        }
-
-        return new ScraperRunResult(
+        $result = new ScraperRunResult(
             grocerKey: $scraper->grocerKey(),
             fetchedPaperCount: count($payloads),
             importedPaperCount: $importedCount,
             skippedDuplicateCount: $skippedDuplicateCount,
         );
+
+        if ($failures !== []) {
+            if ($scrapeJob === null) {
+                $grocer->update([
+                    'health_status' => GrocerHealthStatus::Failing,
+                    'last_failure_at' => now(),
+                ]);
+            }
+
+            throw new ScraperRunException(implode(' ', $failures), $result);
+        }
+
+        if ($scrapeJob === null) {
+            $grocer->update([
+                'health_status' => GrocerHealthStatus::Healthy,
+                'last_success_at' => now(),
+            ]);
+        }
+
+        return $result;
     }
 
     public function scraperFor(string $grocerKey): GrocerScraper

@@ -7,6 +7,7 @@ use App\Enums\ScrapeJobStatus;
 use App\Enums\ScraperAgentStatus;
 use App\Models\ScrapeJob;
 use App\Models\ScraperAgent;
+use App\Scrapers\Exceptions\ScraperRunException;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -46,16 +47,25 @@ class ScrapeJobWorker
                 ? ScrapeJobStatus::Succeeded
                 : ScrapeJobStatus::NoChanges;
 
-            $this->markSuccessful($job, $status, [
+            $completed = $this->markSuccessful($job, $status, [
                 'fetched_paper_count' => $result->fetchedPaperCount,
                 'imported_paper_count' => $result->importedPaperCount,
                 'skipped_duplicate_count' => $result->skippedDuplicateCount,
-            ]);
+            ], expectedAttempt: $job->attempt);
+
+            if (! $completed) {
+                $this->progress($progress, "Scrape job {$job->id} result was ignored because its lease is no longer current.");
+
+                return $job->refresh();
+            }
 
             $this->progress($progress, "Scrape job {$job->id} finished with status {$status->value}.");
         } catch (Throwable $exception) {
-            $this->markFailedAttempt($job, $exception);
-            $this->progress($progress, "Scrape job {$job->id} failed: {$exception->getMessage()}");
+            $failed = $this->markFailedAttempt($job, $exception, expectedAttempt: $job->attempt);
+            $message = $failed
+                ? "Scrape job {$job->id} failed: {$exception->getMessage()}"
+                : "Scrape job {$job->id} failure was ignored because its lease is no longer current.";
+            $this->progress($progress, $message);
         }
 
         return $job->refresh();
@@ -113,13 +123,47 @@ class ScrapeJobWorker
         });
     }
 
+    public function beginUpload(ScrapeJob $job, ScraperAgent $agent, int $attempt): ?ScrapeJob
+    {
+        return DB::transaction(function () use ($job, $agent, $attempt): ?ScrapeJob {
+            $lockedJob = $this->lockJob($job);
+
+            if (! $lockedJob->isActiveAttempt($agent->id, $attempt, ScrapeJobStatus::Running)) {
+                return null;
+            }
+
+            $lockedJob->update([
+                'status' => ScrapeJobStatus::Uploading,
+                'leased_until' => now()->addMinutes(self::LEASE_MINUTES),
+                'payload_received_at' => now(),
+            ]);
+
+            return $lockedJob->refresh()->load('grocer');
+        });
+    }
+
     /**
      * @param  array<string, int>  $context
      */
-    public function markSuccessful(ScrapeJob $job, ScrapeJobStatus $status, array $context): void
-    {
-        DB::transaction(function () use ($job, $status, $context): void {
-            $job->update([
+    public function markSuccessful(
+        ScrapeJob $job,
+        ScrapeJobStatus $status,
+        array $context,
+        ?int $expectedAttempt = null,
+        ScrapeJobStatus $expectedStatus = ScrapeJobStatus::Running,
+    ): bool {
+        return DB::transaction(function () use ($job, $status, $context, $expectedAttempt, $expectedStatus): bool {
+            $lockedJob = $this->lockJob($job);
+
+            if ($expectedAttempt !== null && ! $lockedJob->isActiveAttempt(
+                (string) $job->scraper_agent_id,
+                $expectedAttempt,
+                $expectedStatus,
+            )) {
+                return false;
+            }
+
+            $lockedJob->update([
                 'status' => $status,
                 'leased_until' => null,
                 'finished_at' => now(),
@@ -128,41 +172,94 @@ class ScrapeJobWorker
                 'context' => $context,
             ]);
 
-            $job->grocer->update([
+            $lockedJob->grocer->update([
                 'health_status' => GrocerHealthStatus::Healthy,
                 'last_success_at' => now(),
             ]);
+
+            return true;
         });
     }
 
-    public function markFailedAttempt(ScrapeJob $job, Throwable $exception): void
-    {
-        $this->markFailed($job, $exception->getMessage());
+    public function markFailedAttempt(
+        ScrapeJob $job,
+        Throwable $exception,
+        ?int $expectedAttempt = null,
+        ScrapeJobStatus $expectedStatus = ScrapeJobStatus::Running,
+        ?string $expectedAgentId = null,
+    ): bool {
+        $context = $exception instanceof ScraperRunException && $exception->result !== null
+            ? [
+                'fetched_paper_count' => $exception->result->fetchedPaperCount,
+                'imported_paper_count' => $exception->result->importedPaperCount,
+                'skipped_duplicate_count' => $exception->result->skippedDuplicateCount,
+            ]
+            : [];
+
+        return $this->markFailed(
+            $job,
+            $exception->getMessage(),
+            $expectedAttempt,
+            $expectedStatus,
+            $expectedAgentId,
+            $context,
+        );
     }
 
-    public function markFailed(ScrapeJob $job, string $failureReason): void
-    {
-        DB::transaction(function () use ($job, $failureReason): void {
-            $retryAt = $this->nextRetryAt($job);
+    /**
+     * @param  array<string, int>  $context
+     */
+    public function markFailed(
+        ScrapeJob $job,
+        string $failureReason,
+        ?int $expectedAttempt = null,
+        ScrapeJobStatus $expectedStatus = ScrapeJobStatus::Running,
+        ?string $expectedAgentId = null,
+        array $context = [],
+    ): bool {
+        return DB::transaction(function () use ($job, $failureReason, $expectedAttempt, $expectedStatus, $expectedAgentId, $context): bool {
+            $lockedJob = $this->lockJob($job);
+
+            if ($expectedAttempt !== null && ! $lockedJob->isActiveAttempt(
+                $expectedAgentId ?? (string) $job->scraper_agent_id,
+                $expectedAttempt,
+                $expectedStatus,
+            )) {
+                return false;
+            }
+
+            $retryAt = $this->nextRetryAt($lockedJob);
             $hasRetryTimeRemaining = $retryAt !== null;
 
-            $job->update([
+            $lockedJob->update([
                 'status' => $hasRetryTimeRemaining ? ScrapeJobStatus::Retrying : ScrapeJobStatus::Failed,
-                'scheduled_for' => $hasRetryTimeRemaining ? $retryAt : $job->scheduled_for,
+                'scheduled_for' => $hasRetryTimeRemaining ? $retryAt : $lockedJob->scheduled_for,
                 'leased_until' => null,
                 'finished_at' => now(),
                 'failure_reason' => $failureReason,
                 'context' => [
-                    ...($job->context ?? []),
-                    'last_failed_attempt' => $job->attempt,
+                    ...($lockedJob->context ?? []),
+                    ...$context,
+                    'last_failed_attempt' => $lockedJob->attempt,
                 ],
             ]);
 
-            $job->grocer->update([
+            $lockedJob->grocer->update([
                 'health_status' => $hasRetryTimeRemaining ? GrocerHealthStatus::Failing : GrocerHealthStatus::Stale,
                 'last_failure_at' => now(),
             ]);
+
+            return true;
         });
+    }
+
+    private function lockJob(ScrapeJob $job): ScrapeJob
+    {
+        return ScrapeJob::query()
+            ->with('grocer')
+            ->whereKey($job->id)
+            ->lockForUpdate()
+            ->firstOrFail();
     }
 
     private function retryDelayMinutes(int $attempt): int

@@ -113,9 +113,8 @@ class ScraperAgentController extends Controller
 
     public function storeRawPayloads(Request $request, ScrapeJob $scrapeJob, ScraperRunService $scraperRunService, ScrapeJobWorker $worker): JsonResponse
     {
-        $this->authorizeJob($request, $scrapeJob);
-
         $validated = $request->validate([
+            'attempt' => ['required', 'integer', 'min:1'],
             'payloads' => ['required', 'array', 'min:1'],
             'payloads.*.source_external_id' => ['required', 'string', 'max:255'],
             'payloads.*.title' => ['nullable', 'string', 'max:255'],
@@ -123,15 +122,20 @@ class ScraperAgentController extends Controller
             'payloads.*.already_fetched' => ['sometimes', 'boolean'],
         ]);
 
-        $scraper = $scraperRunService->scraperFor($scrapeJob->grocer->slug);
-        $payloads = array_map(static fn (array $payload): RawPaperPayload => new RawPaperPayload(
-            sourceExternalId: $payload['source_external_id'],
-            rawPayload: $payload['raw_payload'],
-            title: $payload['title'] ?? null,
-            alreadyFetched: $payload['already_fetched'] ?? false,
-        ), $validated['payloads']);
+        $scrapeJob = $worker->beginUpload($scrapeJob, $this->agent($request), $validated['attempt']);
+
+        if (! $scrapeJob) {
+            return $this->staleAttemptResponse();
+        }
 
         try {
+            $scraper = $scraperRunService->scraperFor($scrapeJob->grocer->slug);
+            $payloads = array_map(static fn (array $payload): RawPaperPayload => new RawPaperPayload(
+                sourceExternalId: $payload['source_external_id'],
+                rawPayload: $payload['raw_payload'],
+                title: $payload['title'] ?? null,
+                alreadyFetched: $payload['already_fetched'] ?? false,
+            ), $validated['payloads']);
             $result = $scraperRunService->importPayloads(
                 grocer: $scrapeJob->grocer,
                 scraper: $scraper,
@@ -140,11 +144,15 @@ class ScraperAgentController extends Controller
             );
 
             $status = $result->importedPaperCount > 0 ? ScrapeJobStatus::Succeeded : ScrapeJobStatus::NoChanges;
-            $worker->markSuccessful($scrapeJob, $status, [
+            $completed = $worker->markSuccessful($scrapeJob, $status, [
                 'fetched_paper_count' => $result->fetchedPaperCount,
                 'imported_paper_count' => $result->importedPaperCount,
                 'skipped_duplicate_count' => $result->skippedDuplicateCount,
-            ]);
+            ], expectedAttempt: $validated['attempt'], expectedStatus: ScrapeJobStatus::Uploading);
+
+            if (! $completed) {
+                return $this->staleAttemptResponse();
+            }
 
             return response()->json([
                 'status' => $status->value,
@@ -152,7 +160,16 @@ class ScraperAgentController extends Controller
                 'skipped_duplicate_count' => $result->skippedDuplicateCount,
             ]);
         } catch (Throwable $exception) {
-            $worker->markFailedAttempt($scrapeJob, $exception);
+            $failed = $worker->markFailedAttempt(
+                $scrapeJob,
+                $exception,
+                expectedAttempt: $validated['attempt'],
+                expectedStatus: ScrapeJobStatus::Uploading,
+            );
+
+            if (! $failed) {
+                return $this->staleAttemptResponse();
+            }
 
             return response()->json([
                 'status' => $scrapeJob->refresh()->status->value,
@@ -163,13 +180,21 @@ class ScraperAgentController extends Controller
 
     public function failJob(Request $request, ScrapeJob $scrapeJob, ScrapeJobWorker $worker): JsonResponse
     {
-        $this->authorizeJob($request, $scrapeJob);
-
         $validated = $request->validate([
+            'attempt' => ['required', 'integer', 'min:1'],
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        $worker->markFailed($scrapeJob, $validated['message']);
+        $failed = $worker->markFailed(
+            $scrapeJob,
+            $validated['message'],
+            expectedAttempt: $validated['attempt'],
+            expectedAgentId: $this->agent($request)->id,
+        );
+
+        if (! $failed) {
+            return $this->staleAttemptResponse();
+        }
 
         return response()->json([
             'status' => $scrapeJob->refresh()->status->value,
@@ -184,13 +209,12 @@ class ScraperAgentController extends Controller
         return $agent;
     }
 
-    private function authorizeJob(Request $request, ScrapeJob $scrapeJob): void
+    private function staleAttemptResponse(): JsonResponse
     {
-        $agent = $this->agent($request);
-
-        if ($scrapeJob->scraper_agent_id !== $agent->id || $scrapeJob->status !== ScrapeJobStatus::Running) {
-            abort(403, 'Scrape job is not leased to this agent.');
-        }
+        return response()->json([
+            'status' => 'stale_attempt',
+            'message' => 'Scrape job attempt is no longer current.',
+        ], 409);
     }
 
     private function desiredVersion(): string
