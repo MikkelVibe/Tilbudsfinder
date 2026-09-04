@@ -64,6 +64,7 @@ class ScrapedOffer extends Model
         $query
             ->whereNotNull($query->qualifyColumn('price'))
             ->whereHas('paper', fn (Builder $paperQuery) => $paperQuery
+                ->whereColumn('papers.import_batch_id', 'scraped_offers.import_batch_id')
                 ->where('active_from', '<=', $asOf)
                 ->where('active_until', '>=', $asOf));
     }

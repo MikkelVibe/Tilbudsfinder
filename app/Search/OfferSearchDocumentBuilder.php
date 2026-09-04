@@ -13,6 +13,17 @@ class OfferSearchDocumentBuilder
 
     public function rebuildForImportBatch(ImportBatch $batch): void
     {
+        $paperIds = $batch->papers()->pluck('id');
+
+        if ($paperIds->isEmpty()) {
+            return;
+        }
+
+        OfferSearchDocument::query()
+            ->whereIn('paper_id', $paperIds)
+            ->whereHas('scrapedOffer', fn ($query) => $query->where('import_batch_id', '!=', $batch->id))
+            ->delete();
+
         ScrapedOffer::query()
             ->with(['grocer', 'paper', 'grocerProduct', 'productMatch.canonicalProduct'])
             ->where('import_batch_id', $batch->id)

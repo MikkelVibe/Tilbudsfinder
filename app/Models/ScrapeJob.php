@@ -32,6 +32,15 @@ class ScrapeJob extends Model
         return $this->hasMany(ImportBatch::class);
     }
 
+    public function isActiveAttempt(string $agentId, int $attempt, ScrapeJobStatus $status): bool
+    {
+        return in_array($status, [ScrapeJobStatus::Running, ScrapeJobStatus::Uploading], true)
+            && $this->scraper_agent_id === $agentId
+            && $this->attempt === $attempt
+            && $this->status === $status
+            && $this->leased_until?->isFuture() === true;
+    }
+
     protected function casts(): array
     {
         return [

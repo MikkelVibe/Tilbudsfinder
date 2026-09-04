@@ -11,9 +11,9 @@ use Brick\Math\BigDecimal;
 readonly class NormalizedOffer
 {
     /**
-     * @param list<NormalizationIssue> $issues
-     * @param array<string, mixed> $metadata
-     * @param array<string, mixed>|null $sourcePayload
+     * @param  list<NormalizationIssue>  $issues
+     * @param  array<string, mixed>  $metadata
+     * @param  array<string, mixed>|null  $sourcePayload
      */
     public function __construct(
         public NormalizedOfferStatus $status,
@@ -36,8 +36,7 @@ readonly class NormalizedOffer
         public array $metadata = [],
         public ?array $sourcePayload = null,
         public array $issues = [],
-    ) {
-    }
+    ) {}
 
     public function isPublishable(): bool
     {

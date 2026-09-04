@@ -2,234 +2,224 @@
 
 namespace Tests\Feature\Scrapers;
 
-use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\Rema1000\Rema1000Scraper;
+use App\Scrapers\Rema1000\RemaAdvertisedProductClient;
+use App\Scrapers\Rema1000\RemaTjekClient;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\Request;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class Rema1000ScraperTest extends TestCase
 {
-    public function test_it_fetches_algolia_products_and_groups_them_by_best_tjek_catalog_overlap(): void
+    public function test_it_reconciles_known_papers_from_paginated_rema_and_tjek_sources_without_algolia(): void
     {
-        CarbonImmutable::setTestNow('2026-05-29 12:00:00');
+        CarbonImmutable::setTestNow('2026-09-01 10:00:00');
         Http::preventStrayRequests();
-        Http::fake([
-            'squid-api.tjek.com/v2/catalogs*' => Http::response([
-                $this->catalog('weekly-paper', 'Uge 22', '2026-05-25T22:00:00+0000', '2026-05-30T21:59:59+0000'),
-                $this->catalog('insert-paper', 'Uge 22 Indstik', '2026-05-27T22:00:00+0000', '2026-05-30T21:59:59+0000'),
-                $this->catalog('permanent-prices', 'Nu endnu lavere priser', '2026-05-12T22:00:00+0000', '2026-12-31T22:59:59+0000'),
-                $this->catalog('expired-paper', 'Uge 21', '2026-05-18T22:00:00+0000', '2026-05-25T21:59:59+0000'),
-            ]),
-            'flwdn2189e-dsn.algolia.net/*' => Http::response($this->algoliaResponse([
-                $this->algoliaProduct(60055, 'LIMPAN', '900 GR. / PÅGEN'),
-                $this->algoliaProduct(61251, 'STORE HOTDOGBRØD', '360 GR. / REMA 1000'),
-                $this->algoliaProduct(404995, 'KYLLINGEBRYSTFILET', '450 GR. / DANSK'),
-                $this->algoliaProduct(170209, 'TOILETPAPIR', '684 GR. / REMA 1000'),
-            ])),
-            'cphapp.rema1000.dk/api/v1/catalog/store/1/withchildren' => Http::response($this->catalogV1Response([
-                $this->catalogProduct(60055, 'LIMPAN CATALOG', '900 GR. / PÅGEN'),
-                $this->catalogProduct(61251, 'STORE HOTDOGBRØD', '360 GR. / REMA 1000'),
-                $this->catalogProduct(404995, 'KYLLINGEBRYSTFILET', '450 GR. / DANSK'),
-                $this->catalogProduct(170209, 'TOILETPAPIR', '684 GR. / REMA 1000'),
-                $this->catalogProduct(999999, 'KUN CATALOG', '200 GR. / TEST'),
-            ])),
-            'api.digital.rema1000.dk/api/v3/products/60055?*' => Http::response(['data' => $this->productDetail(60055, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
-            'api.digital.rema1000.dk/api/v3/products/61251?*' => Http::response(['data' => $this->productDetail(61251, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
-            'api.digital.rema1000.dk/api/v3/products/404995?*' => Http::response(['data' => $this->productDetail(404995, '2026-05-26T00:00:00+00:00', '2026-06-13T00:00:00+00:00')]),
-            'api.digital.rema1000.dk/api/v3/products/170209?*' => Http::response(['data' => $this->productDetail(170209, '2026-05-27T23:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
-            'api.digital.rema1000.dk/api/v3/products/999999?*' => Http::response(['data' => $this->productDetail(999999, '2026-05-26T00:00:00+00:00', '2026-05-30T00:00:00+00:00')]),
-        ]);
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), '/catalogs')) {
+                return Http::response([$this->catalog()]);
+            }
 
-        $scraper = new Rema1000Scraper(sleepBetweenDetailRequests: false);
-        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
+            if (str_contains($request->url(), '/offers')) {
+                return Http::response([
+                    $this->tjekOffer('matched-offer', 'Faxe Kondi', 3, 33, 'cl'),
+                    $this->tjekOffer('missing-offer', 'Orkidé', 49, 1, 'pcs'),
+                ]);
+            }
 
-        $this->assertCount(2, $payloads);
-        $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
-        $this->assertSame('insert-paper', $payloads[1]->sourceExternalId);
+            if (str_contains($request->url(), '/search/products')) {
+                return Http::response([
+                    'data' => [$this->product(210617, 'FAXE KONDI', '33 CL. / LEMONADE', 3, 9.09)],
+                    'meta' => ['pagination' => ['last_page' => 1, 'total' => 1]],
+                ]);
+            }
 
-        $weeklyPayload = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
-        $insertPayload = json_decode($payloads[1]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+            return null;
+        });
 
-        $this->assertSame('algolia_product_details_grouped_by_tjek_overlap', $weeklyPayload['catalog']['source_strategy']);
-        $this->assertSame(4, $weeklyPayload['catalog']['fetched_product_offer_count']);
-        $this->assertSame(1, $insertPayload['catalog']['fetched_product_offer_count']);
-        $this->assertContains('LIMPAN CATALOG', array_column(array_column($weeklyPayload['offers'], 'catalog_product'), 'name'));
-        $this->assertTrue(collect($weeklyPayload['offers'])->contains(fn (array $offer): bool => $offer['discovery_comparison']['missing_from_algolia'] === true));
-        $this->assertSame('TOILETPAPIR', $insertPayload['offers'][0]['algolia']['name']);
-        $this->assertFalse(collect($payloads)->contains(fn ($payload): bool => $payload->sourceExternalId === 'permanent-prices'));
-    }
-
-    public function test_it_fails_when_product_detail_coverage_is_too_low(): void
-    {
-        CarbonImmutable::setTestNow('2026-05-29 12:00:00');
-        Http::preventStrayRequests();
-        Http::fake([
-            'squid-api.tjek.com/v2/catalogs*' => Http::response([
-                $this->catalog('weekly-paper', 'Uge 22', '2026-05-25T22:00:00+0000', '2026-05-30T21:59:59+0000'),
-            ]),
-            'flwdn2189e-dsn.algolia.net/*' => Http::response($this->algoliaResponse([
-                $this->algoliaProduct(60055, 'LIMPAN', '900 GR. / PÅGEN'),
-            ])),
-            'cphapp.rema1000.dk/api/v1/catalog/store/1/withchildren' => Http::response($this->catalogV1Response([
-                $this->catalogProduct(60055, 'LIMPAN', '900 GR. / PÅGEN'),
-            ])),
-            'api.digital.rema1000.dk/api/v3/products/60055?*' => Http::response(['message' => 'InternalServerError'], 500),
-        ]);
-
-        $this->expectException(ScraperFetchException::class);
-        $this->expectExceptionMessage('REMA 1000 product detail coverage was 0%, below 95%.');
-
-        $scraper = new Rema1000Scraper(sleepBetweenDetailRequests: false);
-        $scraper->fetchPapers($scraper->discoverPapers());
-    }
-
-    public function test_it_skips_known_catalogs_before_fetching_product_details(): void
-    {
-        CarbonImmutable::setTestNow('2026-05-29 12:00:00');
-        Http::preventStrayRequests();
-        Http::fake([
-            'squid-api.tjek.com/v2/catalogs*' => Http::response([
-                $this->catalog('weekly-paper', 'Uge 22', '2026-05-25T22:00:00+0000', '2026-05-30T21:59:59+0000'),
-            ]),
-        ]);
-
-        $scraper = new Rema1000Scraper(sleepBetweenDetailRequests: false);
-        $payloads = $scraper->fetchPapers($scraper->discoverPapers(), [
-            'weekly-paper' => [
-                'exists' => true,
-                'title' => 'Uge 22',
-                'active_from' => '2026-05-25T22:00:00+00:00',
-                'active_until' => '2026-05-30T21:59:59+00:00',
-            ],
+        $scraper = new Rema1000Scraper;
+        $candidates = $scraper->discoverPapers();
+        $payloads = $scraper->fetchPapers($candidates, [
+            'paper-week-36' => ['exists' => true],
         ]);
 
         $this->assertCount(1, $payloads);
-        $this->assertTrue($payloads[0]->alreadyFetched);
-        $this->assertSame('weekly-paper', $payloads[0]->sourceExternalId);
-        $proof = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
-        $this->assertSame('already_fetched', $proof['status']);
+        $this->assertFalse($payloads[0]->alreadyFetched);
+        $payload = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('rema_tjek_offer_match', $payload['catalog']['source_strategy']);
+        $this->assertSame(2, $payload['catalog']['fetched_offer_count']);
+        $this->assertSame(1, $payload['catalog']['matched_tjek_offer_count']);
+        $this->assertSame(1, $payload['catalog']['missing_tjek_offer_count']);
+        $this->assertSame('210617', (string) $payload['offers'][0]['rema_product']['id']);
+        $this->assertSame('missing_rema_product', $payload['issues'][0]['code']);
+
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'algolia'));
+    }
+
+    public function test_product_discovery_follows_every_declared_page(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-01 10:00:00');
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), '/catalogs')) {
+                return Http::response([$this->catalog(1)]);
+            }
+
+            if (str_contains($request->url(), '/offers')) {
+                return Http::response([$this->tjekOffer('offer-two', 'Second Product', 10, 1, 'kg')]);
+            }
+
+            if (str_contains($request->url(), '/search/products')) {
+                $page = (int) ($request->data()['page'] ?? 1);
+
+                return Http::response([
+                    'data' => [$page === 1
+                        ? $this->product(1, 'FIRST PRODUCT', '1 KG.', 5, 5, 'kg')
+                        : $this->product(2, 'SECOND PRODUCT', '1 KG.', 10, 10, 'kg')],
+                    'meta' => ['pagination' => ['last_page' => 2, 'total' => 2]],
+                ]);
+            }
+
+            return null;
+        });
+
+        $scraper = new Rema1000Scraper;
+        $payload = $scraper->fetchPapers($scraper->discoverPapers())[0];
+        $decoded = json_decode($payload->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertSame('2', (string) $decoded['offers'][0]['rema_product']['id']);
+        Http::assertSentCount(4);
+    }
+
+    public function test_it_preserves_a_failed_tjek_catalog_and_continues_fetching_later_catalogs(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-01 10:00:00');
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), '/catalogs')) {
+                return Http::response([
+                    $this->catalog(2, 'paper-failed', 'Uge 36'),
+                    $this->catalog(1, 'paper-valid', 'Uge 36 Indstik'),
+                ]);
+            }
+
+            if (str_contains($request->url(), '/search/products')) {
+                return Http::response([
+                    'data' => [$this->product(1, 'PRODUCT', '1 KG.', 10, 10, 'kg')],
+                    'meta' => ['pagination' => ['last_page' => 1, 'total' => 1]],
+                ]);
+            }
+
+            if (($request->data()['catalog_id'] ?? null) === 'paper-failed') {
+                return Http::response([$this->tjekOffer('failed-offer', 'Product', 10, 1, 'kg', 'paper-failed')]);
+            }
+
+            if (($request->data()['catalog_id'] ?? null) === 'paper-valid') {
+                return Http::response([$this->tjekOffer('valid-offer', 'Product', 10, 1, 'kg', 'paper-valid')]);
+            }
+
+            return null;
+        });
+
+        $scraper = new Rema1000Scraper;
+        $payloads = $scraper->fetchPapers($scraper->discoverPapers());
+        $failed = json_decode($payloads[0]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+        $valid = json_decode($payloads[1]->rawPayload, true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertCount(2, $payloads);
+        $this->assertSame('paper-failed', $payloads[0]->sourceExternalId);
+        $this->assertSame('rema_tjek_offer_fetch_failed', $failed['catalog']['source_strategy']);
+        $this->assertSame(0, $failed['catalog']['fetched_offer_count']);
+        $this->assertSame('tjek_catalog_fetch_failed', $failed['issues'][0]['code']);
+        $this->assertStringContainsString('declares 2 offers but returned 1', $failed['issues'][0]['message']);
+        $this->assertSame('paper-valid', $payloads[1]->sourceExternalId);
+        $this->assertSame('1', (string) $valid['offers'][0]['rema_product']['id']);
+        $this->assertCount(1, Http::recorded(
+            fn (Request $request): bool => str_contains($request->url(), '/search/products'),
+        ));
+    }
+
+    public function test_rema_product_client_does_not_retry_client_errors(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'api.digital.rema1000.dk/api/search/products*' => Http::response([], 404),
+        ]);
+
+        try {
+            (new RemaAdvertisedProductClient)->fetch();
+            $this->fail('Expected the REMA product request to fail.');
+        } catch (RequestException $exception) {
+            $this->assertSame(404, $exception->response->status());
+        }
 
         Http::assertSentCount(1);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function catalog(string $id, string $label, string $runFrom, string $runTill): array
+    public function test_rema_tjek_client_does_not_retry_client_errors(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'squid-api.tjek.com/v2/offers*' => Http::response([], 404),
+        ]);
+
+        try {
+            (new RemaTjekClient)->offers($this->catalog());
+            $this->fail('Expected the Tjek offer request to fail.');
+        } catch (RequestException $exception) {
+            $this->assertSame(404, $exception->response->status());
+        }
+
+        Http::assertSentCount(1);
+    }
+
+    /** @return array<string, mixed> */
+    private function catalog(int $offerCount = 2, string $id = 'paper-week-36', string $label = 'Uge 36'): array
     {
         return [
             'id' => $id,
             'label' => $label,
-            'run_from' => $runFrom,
-            'run_till' => $runTill,
-            'offer_count' => 20,
-            'page_count' => 12,
+            'run_from' => '2026-08-29T22:00:00+00:00',
+            'run_till' => '2026-09-05T21:59:59+00:00',
+            'offer_count' => $offerCount,
             'dealer_id' => '11deC',
             'dealer' => ['name' => 'REMA 1000'],
         ];
     }
 
-    /**
-     * @param  list<array<string, mixed>>  $hits
-     * @return array<string, mixed>
-     */
-    private function algoliaResponse(array $hits): array
-    {
-        return ['results' => [['hits' => $hits]]];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function algoliaProduct(int $id, string $name, string $underline): array
+    /** @return array<string, mixed> */
+    private function tjekOffer(string $id, string $heading, int|float $price, int|float $size, string $unit, string $catalogId = 'paper-week-36'): array
     {
         return [
             'id' => $id,
-            'objectID' => (string) $id,
-            'name' => $name,
-            'underline' => $underline,
-            'hf2' => 'REMA 1000',
-            'labels' => ['avisvare', 'discount'],
-            'description_short' => "Varenummer: {$id}",
-            'pricing' => [
-                'price' => 10,
-                'price_per_unit' => '11.11 per Kg.',
-                'max_quantity' => 6,
-            ],
-            'images' => [[
-                'large' => "https://images.example/{$id}.webp",
-            ]],
-            'department_id' => 10,
-            'department_name' => 'Brød & Bavinchi',
-            'category_id' => 655390,
-            'category_name' => 'Brød',
+            'catalog_id' => $catalogId,
+            'heading' => $heading,
+            'description' => '',
+            'pricing' => ['price' => $price],
+            'quantity' => ['size' => ['from' => $size, 'to' => $size], 'unit' => ['symbol' => $unit]],
+            'run_from' => '2026-08-29T22:00:00+00:00',
+            'run_till' => '2026-09-05T21:59:59+00:00',
         ];
     }
 
-    /**
-     * @param  list<array<string, mixed>>  $items
-     * @return array<string, mixed>
-     */
-    private function catalogV1Response(array $items): array
-    {
-        return [
-            'departments' => [[
-                'name' => 'Brød & Bavinchi',
-                'categories' => [[
-                    'name' => 'Brød',
-                    'items' => $items,
-                ]],
-            ]],
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function catalogProduct(int $id, string $name, string $underline): array
+    /** @return array<string, mixed> */
+    private function product(int $id, string $name, string $underline, int|float $price, int|float $comparePrice, string $compareUnit = 'ltr'): array
     {
         return [
             'id' => $id,
             'name' => $name,
             'underline' => $underline,
-            'hf2' => 'REMA 1000',
-            'labels' => ['avisvare', 'discount'],
-            'description_short' => "Varenummer: {$id}",
-            'declaration' => 'Ingredienser',
-            'nutrition_info' => [['name' => 'Energi', 'value' => '100 kcal', 'sort' => '1']],
-            'pricing' => [
-                'price' => 10,
-                'normal_price' => 20,
-                'price_per_unit' => '50.00 per Kg.',
-                'max_quantity' => 6,
-                'is_advertised' => true,
-                'price_changes_on' => '2026-05-26',
-                'price_changes_type' => 'campaign',
-            ],
-            'images' => [[
-                'large' => "https://images.example/catalog/{$id}.webp",
-            ]],
-            'bar_codes' => ["570000{$id}"],
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function productDetail(int $id, string $startsAt, string $endsAt): array
-    {
-        return [
-            'id' => $id,
-            'bar_codes' => ["570000{$id}"],
+            'barcodes' => ["570000000{$id}"],
+            'images' => [['large' => "https://images.example/{$id}.webp"]],
             'prices' => [[
-                'price' => 10,
+                'price' => $price,
+                'compare_unit_price' => $comparePrice,
+                'compare_unit' => $compareUnit,
                 'is_advertised' => true,
-                'is_campaign' => true,
-                'starting_at' => $startsAt,
-                'ending_at' => $endsAt,
-                'compare_unit_price' => 11.11,
-                'max_quantity' => 6,
+                'starting_at' => '2026-08-30T00:00:00+00:00',
+                'ending_at' => '2026-09-30T00:00:00+00:00',
             ]],
         ];
     }

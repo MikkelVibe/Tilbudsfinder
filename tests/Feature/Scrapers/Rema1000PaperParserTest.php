@@ -3,11 +3,10 @@
 namespace Tests\Feature\Scrapers;
 
 use App\Enums\ImportBatchStatus;
-use App\Enums\NormalizationStatus;
 use App\Imports\ImportPersistencePipeline;
 use App\Models\Grocer;
+use App\Models\GrocerProduct;
 use App\Models\ImportBatch;
-use App\Models\NormalizationFailure;
 use App\Models\Paper;
 use App\Models\ScrapedOffer;
 use App\Scrapers\Exceptions\ScraperParseException;
@@ -20,203 +19,99 @@ class Rema1000PaperParserTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_parses_rema_fixture_into_paper_input(): void
+    public function test_it_parses_matched_rema_products_and_import_issues(): void
     {
         $paper = (new Rema1000PaperParser)->parse($this->fixture());
 
-        $this->assertSame('zLEWCiXQ', $paper->sourceExternalId);
-        $this->assertSame('Uge 23', $paper->title);
-        $this->assertSame('2026-05-30 22:00:00', $paper->activeFrom->format('Y-m-d H:i:s'));
-        $this->assertSame('2026-06-06 21:59:59', $paper->activeUntil->format('Y-m-d H:i:s'));
-        $this->assertCount(12, $paper->offers);
-        $this->assertSame('REMA 1000', $paper->metadata['dealer_name']);
-        $this->assertSame(147, $paper->metadata['offer_count']);
-        $this->assertSame(12, $paper->metadata['fetched_offer_count']);
-        $this->assertSame(135, $paper->metadata['offer_count_mismatch']);
+        $this->assertSame('week-36', $paper->sourceExternalId);
+        $this->assertSame('Uge 36', $paper->title);
+        $this->assertSame('2026-08-29 22:00:00', $paper->activeFrom->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-09-05 21:59:59', $paper->activeUntil->format('Y-m-d H:i:s'));
+        $this->assertTrue($paper->reconcileExistingPaper);
+        $this->assertCount(1, $paper->offers);
+        $this->assertCount(1, $paper->issues);
+        $this->assertSame(2, $paper->metadata['fetched_offer_count']);
+        $this->assertSame(1, $paper->metadata['matched_tjek_offer_count']);
+        $this->assertSame(1, $paper->metadata['matched_product_count']);
 
-        $offer = $paper->offers[3];
+        $offer = $paper->offers[0];
 
-        $this->assertSame('Grillpølser', $offer->title);
-        $this->assertSame(10, $offer->price);
-        $this->assertSame('200 g. 50.00 pr. kg 200 g', $offer->packageText);
-        $this->assertSame('IL50sUKQocj-efUeh-jND', $offer->sourceOfferId);
-        $this->assertSame('https://images.example/rema/grillpoelser-zoom.webp', $offer->imageUrl);
-        $this->assertSame(6, $offer->metadata['catalog_page']);
+        $this->assertSame('FAXE KONDI', $offer->title);
+        $this->assertSame('210617', $offer->sourceProductId);
+        $this->assertSame('tjek-faxe', $offer->sourceOfferId);
+        $this->assertSame('2026-09-03T00:00:00+00:00', $offer->metadata['price_starts_at']);
+        $this->assertSame('Drikkevarer', $offer->metadata['category']);
+        $this->assertSame('Sodavand', $offer->metadata['subcategory']);
+        $this->assertSame('Vand, kulsyre og naturlig aroma.', $offer->metadata['declaration']);
+        $this->assertSame('missing_rema_product', $paper->issues[0]->code);
     }
 
-    public function test_it_persists_parsed_rema_fixture_through_import_pipeline(): void
+    public function test_it_persists_matched_rema_fixture_through_import_pipeline(): void
     {
         Storage::fake('local');
-
         $grocer = Grocer::factory()->create(['slug' => 'rema1000']);
         $paper = (new Rema1000PaperParser)->parse($this->fixture());
 
         $batch = (new ImportPersistencePipeline)->persist($grocer, $paper);
 
         $this->assertSame(ImportBatchStatus::Succeeded, $batch->status);
-        $this->assertSame(12, $batch->parsed_offer_count);
-        $this->assertSame(12, $batch->published_offer_count);
-        $this->assertSame(0, $batch->normalization_failure_count);
+        $this->assertSame(1, $batch->published_offer_count);
+        $this->assertSame(1, $batch->metadata['import_issue_count']);
+        $this->assertSame('missing_rema_product', $batch->metadata['import_issues'][0]['code']);
         $this->assertTrue(Storage::disk('local')->exists($batch->raw_payload_path));
-
         $this->assertSame(1, ImportBatch::query()->count());
-        $this->assertSame(1, Paper::query()->where('source_external_id', 'zLEWCiXQ')->count());
-        $this->assertSame(12, ScrapedOffer::query()->count());
-        $this->assertSame(0, NormalizationFailure::query()->count());
+        $this->assertSame(1, Paper::query()->where('source_external_id', 'week-36')->count());
+        $this->assertSame(1, ScrapedOffer::query()->where('source_product_id', '210617')->count());
 
-        $grillSausages = ScrapedOffer::query()->where('source_offer_id', 'IL50sUKQocj-efUeh-jND')->firstOrFail();
+        $product = GrocerProduct::query()->where('source_product_id', '210617')->firstOrFail();
 
-        $this->assertSame('Grillpølser', $grillSausages->title);
-        $this->assertSame('10.00', $grillSausages->price);
-        $this->assertSame('200.000', $grillSausages->package_amount);
-        $this->assertSame('kg', $grillSausages->compare_unit);
-        $this->assertSame('50.00', $grillSausages->unit_price);
-        $this->assertSame(NormalizationStatus::Succeeded, $grillSausages->normalization_status);
+        $this->assertSame('Drikkevarer', $product->category);
+        $this->assertSame('Sodavand', $product->subcategory);
+        $this->assertSame('Vand, kulsyre og naturlig aroma.', $product->declaration);
     }
 
-    public function test_it_parses_product_level_rema_payload(): void
-    {
-        $payload = [
-            'catalog' => [
-                'id' => 'weekly-paper',
-                'label' => 'Uge 22',
-                'run_from' => '2026-05-25T22:00:00+0000',
-                'run_till' => '2026-05-30T21:59:59+0000',
-                'dealer_id' => '11deC',
-                'dealer' => ['name' => 'REMA 1000'],
-                'source_strategy' => 'algolia_product_details_grouped_by_tjek_overlap',
-                'fetched_product_offer_count' => 10,
-            ],
-            'offers' => array_map(fn (int $number): array => $this->productOffer($number), range(1, 10)),
-        ];
-
-        $paper = (new Rema1000PaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
-
-        $this->assertSame('weekly-paper', $paper->sourceExternalId);
-        $this->assertSame('algolia_product_details_grouped_by_tjek_overlap', $paper->metadata['source_strategy']);
-        $this->assertSame(10, $paper->metadata['fetched_product_offer_count']);
-        $this->assertCount(10, $paper->offers);
-
-        $offer = $paper->offers[0];
-
-        $this->assertSame('PRODUCT 1', $offer->title);
-        $this->assertSame(10, $offer->price);
-        $this->assertSame('200 GR. / REMA 1000', $offer->packageText);
-        $this->assertSame(50, $offer->sourceUnitPrice);
-        $this->assertSame('1', $offer->sourceProductId);
-        $this->assertSame('Maks. 6', $offer->purchaseLimitText);
-        $this->assertSame('Brød', $offer->metadata['category_name']);
-        $this->assertSame('2026-05-26T00:00:00+00:00', $offer->metadata['price_starts_at']);
-    }
-
-    public function test_it_prefers_catalog_product_metadata_when_available(): void
-    {
-        $payload = [
-            'catalog' => [
-                'id' => 'weekly-paper',
-                'label' => 'Uge 22',
-                'run_from' => '2026-05-25T22:00:00+0000',
-                'run_till' => '2026-05-30T21:59:59+0000',
-                'dealer_id' => '11deC',
-                'dealer' => ['name' => 'REMA 1000'],
-                'source_strategy' => 'algolia_product_details_grouped_by_tjek_overlap',
-                'fetched_product_offer_count' => 10,
-            ],
-            'offers' => array_map(fn (int $number): array => $this->productOffer($number, catalogProduct: true), range(1, 10)),
-        ];
-
-        $paper = (new Rema1000PaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
-        $offer = $paper->offers[0];
-
-        $this->assertSame('CATALOG PRODUCT 1', $offer->title);
-        $this->assertSame('250 GR. / CATALOG', $offer->packageText);
-        $this->assertSame('https://images.example/catalog/1.webp', $offer->imageUrl);
-        $this->assertSame(20, $offer->metadata['normal_price']);
-        $this->assertSame('2026-05-26', $offer->metadata['catalog_price_changes_on']);
-        $this->assertSame('campaign', $offer->metadata['catalog_price_changes_type']);
-        $this->assertSame('Ingredienser', $offer->metadata['declaration']);
-        $this->assertTrue($offer->metadata['missing_from_algolia']);
-    }
-
-    public function test_it_rejects_rema_fixture_with_too_few_offers(): void
+    public function test_it_allows_a_fully_accounted_zero_match_payload_for_failed_batch_logging(): void
     {
         $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
-        $payload['offers'] = array_slice($payload['offers'], 0, 9);
+        $payload['offers'] = [];
+        $payload['catalog']['matched_tjek_offer_count'] = 0;
+        $payload['catalog']['matched_product_count'] = 0;
+        $payload['catalog']['missing_tjek_offer_count'] = 2;
+
+        $paper = (new Rema1000PaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+
+        $this->assertSame([], $paper->offers);
+        $this->assertTrue($paper->reconcileExistingPaper);
+    }
+
+    public function test_it_rejects_unreconciled_match_accounting(): void
+    {
+        $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
+        $payload['catalog']['missing_tjek_offer_count'] = 0;
 
         $this->expectException(ScraperParseException::class);
-        $this->expectExceptionMessage('REMA 1000 paper must contain at least 10 parsed offers.');
+        $this->expectExceptionMessage('Tjek accounting does not reconcile');
+
+        (new Rema1000PaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_it_rejects_obsolete_algolia_payloads(): void
+    {
+        $payload = json_decode($this->fixture(), true, flags: JSON_THROW_ON_ERROR);
+        $payload['offers'] = [[
+            'algolia' => ['id' => 1, 'name' => 'Old payload'],
+            'product_detail' => ['id' => 1],
+            'advertised_price' => ['price' => 10],
+        ]];
+
+        $this->expectException(ScraperParseException::class);
+        $this->expectExceptionMessage('must contain rema_product, advertised_price, and tjek_offer');
 
         (new Rema1000PaperParser)->parse(json_encode($payload, JSON_THROW_ON_ERROR));
     }
 
     private function fixture(): string
     {
-        return file_get_contents(base_path('tests/Fixtures/scrapers/rema1000/uge-23-combined.json'));
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function productOffer(int $number, bool $catalogProduct = false): array
-    {
-        $offer = [
-            'algolia' => [
-                'id' => $number,
-                'objectID' => (string) $number,
-                'name' => "PRODUCT {$number}",
-                'underline' => '200 GR. / REMA 1000',
-                'hf2' => 'REMA 1000',
-                'description_short' => "Varenummer: {$number}",
-                'pricing' => ['price' => 10, 'price_per_unit' => '50.00 per Kg.', 'max_quantity' => 6],
-                'images' => [['large' => "https://images.example/{$number}.webp"]],
-                'department_id' => 10,
-                'department_name' => 'Brød & Bavinchi',
-                'category_id' => 655390,
-                'category_name' => 'Brød',
-            ],
-            'product_detail' => [
-                'id' => $number,
-                'bar_codes' => ["570000{$number}"],
-            ],
-            'advertised_price' => [
-                'price' => 10,
-                'compare_unit_price' => 50,
-                'max_quantity' => 6,
-                'is_campaign' => true,
-                'starting_at' => '2026-05-26T00:00:00+00:00',
-                'ending_at' => '2026-05-30T00:00:00+00:00',
-            ],
-            'discovery_comparison' => [
-                'missing_from_catalog' => false,
-                'missing_from_algolia' => false,
-            ],
-        ];
-
-        if ($catalogProduct) {
-            $offer['catalog_product'] = [
-                'id' => $number,
-                'name' => "CATALOG PRODUCT {$number}",
-                'underline' => '250 GR. / CATALOG',
-                'hf2' => 'CATALOG',
-                'description_short' => "Catalog varenummer: {$number}",
-                'declaration' => 'Ingredienser',
-                'nutrition_info' => [['name' => 'Energi', 'value' => '100 kcal', 'sort' => '1']],
-                'pricing' => [
-                    'price' => 10,
-                    'normal_price' => 20,
-                    'price_per_unit' => '40.00 per Kg.',
-                    'price_changes_on' => '2026-05-26',
-                    'price_changes_type' => 'campaign',
-                    'max_quantity' => 6,
-                ],
-                'images' => [['large' => "https://images.example/catalog/{$number}.webp"]],
-                'department_name' => 'Catalog afdeling',
-                'category_name' => 'Catalog kategori',
-                'bar_codes' => ["570001{$number}"],
-            ];
-            $offer['discovery_comparison']['missing_from_algolia'] = true;
-        }
-
-        return $offer;
+        return file_get_contents(base_path('tests/Fixtures/scrapers/rema1000/uge-36-matched-flow.json'));
     }
 }

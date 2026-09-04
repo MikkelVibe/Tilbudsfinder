@@ -10,6 +10,7 @@ readonly class ParsedPaperInput
 {
     /**
      * @param  list<ParsedOfferInput>  $offers
+     * @param  list<ImportIssueInput>  $issues
      * @param  array<string, mixed>  $metadata
      */
     public function __construct(
@@ -20,7 +21,9 @@ readonly class ParsedPaperInput
         public ?string $title = null,
         public ?string $sourceUrl = null,
         public ?string $rawPayload = null,
+        public array $issues = [],
         public array $metadata = [],
+        public bool $reconcileExistingPaper = false,
     ) {
         if (trim($sourceExternalId) === '') {
             throw new InvalidArgumentException('Parsed paper source external ID is required.');

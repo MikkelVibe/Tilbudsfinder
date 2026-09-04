@@ -5,13 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\Grocer;
 use App\Models\ScrapedOffer;
 use App\Popularity\PopularOffers;
+use App\Search\DatabaseOfferSearchEngine;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class HomeController extends Controller
 {
-    public function __invoke(PopularOffers $popularOffers): Response
+    public function __invoke(PopularOffers $popularOffers, DatabaseOfferSearchEngine $databaseSearch): Response
     {
         $enabledStoreSlugs = $this->enabledStoreSlugs();
 
@@ -19,7 +21,7 @@ class HomeController extends Controller
             'appName' => config('app.name'),
             'popularOffers' => $this->popularOffers($popularOffers),
             'latestOffers' => $this->latestOffers(),
-            'stores' => $this->stores(),
+            'stores' => $this->stores($databaseSearch->activeProductCountsByGrocer()),
             'allStoreSlugs' => $enabledStoreSlugs,
             'enabledStoreCount' => count($enabledStoreSlugs),
         ]);
@@ -62,21 +64,27 @@ class HomeController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    private function stores(): array
+    private function stores(Collection $activeCounts): array
     {
         return Grocer::query()
             ->select(['id', 'slug', 'name'])
             ->where('is_enabled', true)
-            ->withCount(['scrapedOffers as offer_count' => fn ($query) => $query
-                ->publiclyActive()])
-            ->orderByDesc('offer_count')
             ->orderBy('name')
-            ->limit(6)
             ->get()
             ->map(fn (Grocer $grocer): array => [
                 'slug' => $grocer->slug,
                 'name' => $grocer->name,
-                'count' => sprintf('%d tilbud', $grocer->offer_count),
+                'offerCount' => (int) ($activeCounts[$grocer->slug] ?? 0),
+            ])
+            ->sortBy([
+                ['offerCount', 'desc'],
+                ['name', 'asc'],
+            ])
+            ->take(6)
+            ->map(fn (array $grocer): array => [
+                'slug' => $grocer['slug'],
+                'name' => $grocer['name'],
+                'count' => sprintf('%d tilbud', $grocer['offerCount']),
             ])
             ->values()
             ->all();

@@ -3,6 +3,7 @@
 namespace App\Search;
 
 use App\Models\OfferSearchDocument;
+use App\Models\ScrapedOffer;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator as Paginator;
@@ -29,9 +30,7 @@ class DatabaseOfferSearchEngine implements OfferSearchEngine
         $queryText = trim((string) $query->query);
         $hasQuery = $queryText !== '';
 
-        $documents = OfferSearchDocument::query()
-            ->where('active_from', '<=', now())
-            ->where('active_until', '>=', now());
+        $documents = $this->activeDocumentsQuery();
 
         if ($query->grocerSlugs !== []) {
             $documents->whereIn('grocer_slug', $query->grocerSlugs);
@@ -47,9 +46,52 @@ class DatabaseOfferSearchEngine implements OfferSearchEngine
 
         if ($hasQuery) {
             $this->applyTextSearch($documents, $queryText);
+        } else {
+            $documents->select('offer_search_documents.*');
         }
 
+        $this->addGroupingGrocerProductId($documents);
+
         return $this->paginateProductGroups($documents, $query, $hasQuery);
+    }
+
+    /** @return Collection<string, int> */
+    public function activeProductCountsByGrocer(): Collection
+    {
+        $documents = $this->activeDocumentsQuery()
+            ->select('offer_search_documents.*');
+        $this->addGroupingGrocerProductId($documents);
+        $groupExpression = $this->productGroupExpression('filtered');
+
+        return DB::query()
+            ->fromSub($documents->toBase(), 'filtered')
+            ->selectRaw("filtered.grocer_slug, count(distinct {$groupExpression}) as offer_count")
+            ->groupBy('filtered.grocer_slug')
+            ->pluck('offer_count', 'grocer_slug')
+            ->map(fn (mixed $count): int => (int) $count);
+    }
+
+    /** @return Builder<OfferSearchDocument> */
+    private function activeDocumentsQuery(): Builder
+    {
+        return OfferSearchDocument::query()
+            ->where('active_from', '<=', now())
+            ->where('active_until', '>=', now())
+            ->whereHas('grocer', fn (Builder $grocerQuery) => $grocerQuery->where('is_enabled', true))
+            ->whereHas('scrapedOffer', fn (Builder $offerQuery) => $offerQuery
+                ->whereHas('paper', fn (Builder $paperQuery) => $paperQuery
+                    ->whereColumn('papers.import_batch_id', 'scraped_offers.import_batch_id')));
+    }
+
+    /** @param Builder<OfferSearchDocument> $documents */
+    private function addGroupingGrocerProductId(Builder $documents): void
+    {
+        $documents->addSelect([
+            'grouping_grocer_product_id' => ScrapedOffer::query()
+                ->select('grocer_product_id')
+                ->whereColumn('scraped_offers.id', 'offer_search_documents.scraped_offer_id')
+                ->limit(1),
+        ]);
     }
 
     /**
@@ -108,10 +150,10 @@ class DatabaseOfferSearchEngine implements OfferSearchEngine
     private function productGroupExpression(string $alias): string
     {
         if (DB::connection()->getDriverName() === 'pgsql') {
-            return "coalesce('canonical_' || {$alias}.canonical_product_id::text, 'scraped_' || {$alias}.scraped_offer_id::text)";
+            return "coalesce('canonical_' || {$alias}.canonical_product_id::text, 'grocer_' || {$alias}.grouping_grocer_product_id::text, 'scraped_' || {$alias}.scraped_offer_id::text)";
         }
 
-        return "coalesce(concat('canonical_', {$alias}.canonical_product_id), concat('scraped_', {$alias}.scraped_offer_id))";
+        return "coalesce(concat('canonical_', {$alias}.canonical_product_id), concat('grocer_', {$alias}.grouping_grocer_product_id), concat('scraped_', {$alias}.scraped_offer_id))";
     }
 
     private function displayTitleExpression(string $alias): string

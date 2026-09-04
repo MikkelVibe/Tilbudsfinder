@@ -5,6 +5,10 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
 
+        @if (config('services.google_analytics.measurement_id'))
+            <meta name="google-analytics-id" content="{{ config('services.google_analytics.measurement_id') }}">
+        @endif
+
         <title inertia>{{ config('app.name', 'Tilbudsfinder') }}</title>
 
         <link rel="preconnect" href="https://fonts.googleapis.com">

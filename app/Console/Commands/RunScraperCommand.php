@@ -9,19 +9,16 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Throwable;
 
-#[Signature('scraper:run {grocer : The grocer scraper key, e.g. rema1000, nemlig, netto, foetex, bilka, meny, spar, minkobmand, kvickly, superbrugsen, daglibrugsen, or 365discount} {--limit= : Limit discovered products/offers for live smoke tests} {--no-delay : Disable scraper politeness delays for tests only} {--skip-known : Skip papers that already exist in the local database}')]
+#[Signature('scraper:run {grocer : The grocer scraper key, e.g. rema1000, nemlig, netto, foetex, bilka, meny, spar, minkobmand, kvickly, superbrugsen, daglibrugsen, or 365discount} {--skip-known : Skip papers that already exist in the local database}')]
 #[Description('Fetch and import active papers for a grocer scraper')]
 class RunScraperCommand extends Command
 {
     public function handle(ScraperRunService $scraperRunService): int
     {
         try {
-            $limit = $this->option('limit') === null ? null : (int) $this->option('limit');
             $result = $scraperRunService->run(
-                (string) $this->argument('grocer'),
-                $limit > 0 ? $limit : null,
-                ! (bool) $this->option('no-delay'),
-                function (string $message): void {
+                grocerKey: (string) $this->argument('grocer'),
+                progress: function (string $message): void {
                     $this->line($message);
                 },
                 skipKnown: (bool) $this->option('skip-known'),
