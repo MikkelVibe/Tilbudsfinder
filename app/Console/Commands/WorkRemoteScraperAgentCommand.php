@@ -9,6 +9,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Throwable;
+use UnexpectedValueException;
 
 #[Signature('scraper-agent:work {--server= : The VPS base URL} {--token= : The scraper agent bearer token} {--app-version= : Current scraper agent image/app version}')]
 #[Description('Poll the VPS for one scrape job, fetch raw payloads, and upload them')]
@@ -92,6 +93,10 @@ class WorkRemoteScraperAgentCommand extends Command
             }
 
             $response = $uploadResponse->throw()->json();
+
+            if (! is_array($response) || ! in_array($response['status'] ?? null, ['succeeded', 'no_changes'], true)) {
+                throw new UnexpectedValueException('The server did not acknowledge the scrape upload with a completed status.');
+            }
         } catch (Throwable $exception) {
             $failureResponse = $client->post($server."/api/scraper-agent/jobs/{$jobId}/fail", [
                 'attempt' => $attempt,

@@ -81,6 +81,22 @@ class DagrofaScraperTest extends TestCase
         $this->assertSame('minkobmand', (new MinKobmandScraper)->grocerKey());
     }
 
+    public function test_it_ignores_prices_interleaved_with_textual_validity_dates(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'ugensavis.spar.dk/' => Http::response($this->ipaperHtml(
+                'SPAR uge 4126', 3060504, '9e7e02c9-2f98-444b-b19b-6d1a55b6396f',
+                'AVISEN GÆLDER FRA FREDAG Denne avis indeholder både gode priser STOR PAKKE Cordon Bleu af Fjerkræ 980 g. Kg pris 40,82. Pr. pakke 40.- 2. OKTOBER TIL OG MED TORSDAG og et udvalg af vores vejledende priser. Magnum Ispinde Almond, White chocolate eller 49.- Classic. 6 stk. Stk. pris 8,17. Frost. BEGRÆNSET PARTI. Pr. æske 8. OKTOBER 2026',
+            )),
+        ]);
+
+        $paper = (new SparScraper)->discoverPapers()[0];
+
+        $this->assertSame('2026-10-02T00:00:00+00:00', $paper->sourcePayload['run_from']);
+        $this->assertSame('2026-10-08T23:59:59+00:00', $paper->sourcePayload['run_till']);
+    }
+
     private function assertDiscoveredPaper(
         MenyScraper|SparScraper|MinKobmandScraper $scraper,
         string $sourceExternalId,

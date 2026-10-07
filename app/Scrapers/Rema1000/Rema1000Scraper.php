@@ -74,6 +74,17 @@ class Rema1000Scraper implements GrocerScraper
             }
 
             $match = $this->matcher->match($catalog, $tjekOffers, $products);
+            $countMismatch = (int) $catalog['offer_count'] - count($tjekOffers);
+            $issues = $match->issues;
+
+            if ($countMismatch !== 0) {
+                $issues[] = [
+                    'code' => 'tjek_offer_count_mismatch',
+                    'source_catalog_id' => $catalogId,
+                    'message' => "Tjek catalog {$catalogId} declares {$catalog['offer_count']} offers but returned ".count($tjekOffers).'.',
+                    'context' => ['declared_count' => (int) $catalog['offer_count'], 'fetched_count' => count($tjekOffers)],
+                ];
+            }
 
             $payloads[] = new RawPaperPayload(
                 sourceExternalId: $catalogId,
@@ -82,6 +93,7 @@ class Rema1000Scraper implements GrocerScraper
                         ...$catalog,
                         'source_strategy' => 'rema_tjek_offer_match',
                         'fetched_offer_count' => count($tjekOffers),
+                        'offer_count_mismatch' => $countMismatch,
                         'matched_tjek_offer_count' => $match->matchedTjekOfferCount,
                         'matched_product_count' => count($match->matchedOffers),
                         'ambiguous_tjek_offer_count' => $match->ambiguousTjekOfferCount,
@@ -89,7 +101,7 @@ class Rema1000Scraper implements GrocerScraper
                         'resolved_product_conflict_count' => $match->resolvedConflictCount,
                     ],
                     'offers' => $match->matchedOffers,
-                    'issues' => $match->issues,
+                    'issues' => $issues,
                 ]),
                 title: $candidate->title,
             );
