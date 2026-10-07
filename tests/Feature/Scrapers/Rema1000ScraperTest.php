@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Scrapers;
 
+use App\Scrapers\Exceptions\ScraperFetchException;
 use App\Scrapers\Rema1000\Rema1000Scraper;
 use App\Scrapers\Rema1000\RemaAdvertisedProductClient;
 use App\Scrapers\Rema1000\RemaTjekClient;
@@ -9,6 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class Rema1000ScraperTest extends TestCase
@@ -156,6 +158,54 @@ class Rema1000ScraperTest extends TestCase
         }
 
         Http::assertSentCount(1);
+    }
+
+    public function test_it_records_a_small_count_shortfall_without_discarding_the_paper(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-01 10:00:00');
+        Http::preventStrayRequests();
+        $offers = array_map(fn (int $id): array => $this->tjekOffer('offer-'.$id, 'Product', 10, 1, 'kg'), range(1, 123));
+        Http::fake([
+            'squid-api.tjek.com/v2/catalogs*' => Http::response([$this->catalog(124)]),
+            'squid-api.tjek.com/v2/offers*' => Http::sequence()->push(array_slice($offers, 0, 100))->push(array_slice($offers, 100)),
+            'api.digital.rema1000.dk/api/search/products*' => Http::response([
+                'data' => [$this->product(1, 'PRODUCT', '1 KG.', 10, 10, 'kg')],
+                'meta' => ['pagination' => ['last_page' => 1, 'total' => 1]],
+            ]),
+        ]);
+
+        $scraper = new Rema1000Scraper;
+        $payload = $scraper->fetchPapers($scraper->discoverPapers())[0];
+        $paper = $scraper->parse($payload);
+
+        $this->assertSame(123, $paper->metadata['fetched_offer_count']);
+        $this->assertSame(1, $paper->metadata['offer_count_mismatch']);
+        $issue = collect($paper->issues)->first(fn ($issue): bool => $issue->code === 'tjek_offer_count_mismatch');
+        $this->assertNotNull($issue);
+        $this->assertSame(['declared_count' => 124, 'fetched_count' => 123], $issue->context);
+        Http::assertSentCount(4);
+    }
+
+    #[DataProvider('offerCounts')]
+    public function test_it_rejects_empty_and_excessive_or_overreported_count_mismatches(int $declared, int $actual, bool $accepted): void
+    {
+        Http::preventStrayRequests();
+
+        $offers = array_map(fn (int $id): array => ['id' => 'offer-'.$id], $actual === 0 ? [] : range(1, $actual));
+        Http::fake(['squid-api.tjek.com/v2/offers*' => Http::response($offers)]);
+
+        try {
+            $result = (new RemaTjekClient)->offers($this->catalog($declared));
+            $this->assertTrue($accepted, "Unexpectedly accepted {$actual}/{$declared} offers.");
+            $this->assertCount($actual, $result);
+        } catch (ScraperFetchException) {
+            $this->assertFalse($accepted, "Unexpectedly rejected {$actual}/{$declared} offers.");
+        }
+    }
+
+    public static function offerCounts(): array
+    {
+        return [[100, 99, true], [100, 98, false], [99, 98, false], [1, 2, false], [0, 0, false]];
     }
 
     public function test_rema_tjek_client_does_not_retry_client_errors(): void

@@ -17,6 +17,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ScraperAgentApiTest extends TestCase
@@ -521,6 +522,36 @@ class ScraperAgentApiTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://tilbud.test/api/scraper-agent/version');
+    }
+
+    #[DataProvider('invalidUploadAcknowledgements')]
+    public function test_agent_reports_http_200_uploads_without_a_valid_acknowledgement_as_failures(string|array $body): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 12:00:00');
+        Http::preventStrayRequests();
+
+        Http::fake([
+            '*tilbud.test/api/scraper-agent/version' => Http::response(['desired_version' => 'sha-123']),
+            '*tilbud.test/api/scraper-agent/heartbeat' => Http::response(['status' => 'ok']),
+            '*tilbud.test/api/scraper-agent/jobs/claim' => Http::response([
+                'job' => ['id' => 'job-123', 'grocer' => 'netto', 'attempt' => 1],
+            ]),
+            'squid-api.tjek.com/v2/catalogs*' => Http::response([$this->nettoCatalog('weekly-paper', 'Uge 23', 12)]),
+            '*tilbud.test/api/scraper-agent/papers/exists' => Http::response(['ids' => ['weekly-paper' => ['exists' => true]]]),
+            '*tilbud.test/api/scraper-agent/jobs/job-123/raw-payloads' => Http::response($body),
+            '*tilbud.test/api/scraper-agent/jobs/job-123/fail' => Http::response(['status' => 'retrying']),
+        ]);
+
+        $this->artisan('scraper-agent:work --server=https://tilbud.test --token=secret --app-version=sha-123')
+            ->assertFailed();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/job-123/fail')
+            && $request['message'] === 'The server did not acknowledge the scrape upload with a completed status.');
+    }
+
+    public static function invalidUploadAcknowledgements(): array
+    {
+        return [['PHP Warning: POST Content-Length exceeds the limit'], [[]], [['status' => 'running']]];
     }
 
     /**

@@ -94,7 +94,9 @@ class RemaTjekClient
             $offset += count($page);
         } while (count($page) === $pageSize);
 
-        if (count($offers) !== $declaredCount) {
+        $missingCount = $declaredCount - count($offers);
+
+        if ($offers === [] || $missingCount < 0 || $missingCount * 100 > $declaredCount) {
             throw new ScraperFetchException("Tjek catalog {$catalogId} declares {$declaredCount} offers but returned ".count($offers).'.');
         }
 

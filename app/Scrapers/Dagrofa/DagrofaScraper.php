@@ -218,7 +218,10 @@ class DagrofaScraper implements GrocerScraper
             );
         }
 
-        if (preg_match('/g(?:æ|ae)lder.{0,300}?(?<from_day>\d{1,2})\.\s*(?<from_month>[[:alpha:]æøåÆØÅ]+)(?:\s+(?<from_year>\d{4}))?.{0,300}?(?<until_day>\d{1,2})\.\s*(?<until_month>[[:alpha:]æøåÆØÅ]+)\s+(?<until_year>\d{4})/isu', $body, $matches) !== 1) {
+        $month = '(?:januar|jan|februar|feb|marts|mar|april|apr|maj|juni|jun|juli|jul|august|aug|september|sep|oktober|okt|november|nov|december|dec)';
+        $day = '(?<![\d,.])(?:0?[1-9]|[12]\d|3[01])';
+
+        if (preg_match('/g(?:æ|ae)lder.{0,300}?(?<from_day>'.$day.')\.\s*(?<from_month>'.$month.')\b(?:\s+(?<from_year>\d{4}))?.{0,300}?(?<until_day>'.$day.')\.\s*(?<until_month>'.$month.')\b\s+(?<until_year>\d{4})/isu', $body, $matches) !== 1) {
             return [];
         }
 
