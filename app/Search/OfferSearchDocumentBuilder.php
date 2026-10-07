@@ -25,9 +25,16 @@ class OfferSearchDocumentBuilder
             ->delete();
 
         ScrapedOffer::query()
-            ->with(['grocer', 'paper', 'grocerProduct', 'productMatch.canonicalProduct'])
+            ->select([
+                'id', 'grocer_id', 'paper_id', 'grocer_product_id', 'title', 'description',
+                'image_url', 'price', 'package_amount', 'package_unit', 'compare_unit', 'unit_price', 'currency',
+            ])
+            ->with([
+                'grocer', 'paper', 'productMatch.canonicalProduct',
+                'grocerProduct:id,brand,category,subcategory,description,image_url',
+            ])
             ->where('import_batch_id', $batch->id)
-            ->eachById(fn (ScrapedOffer $offer): mixed => $this->updateForOffer($offer));
+            ->eachById(fn (ScrapedOffer $offer): mixed => $this->updateForOffer($offer), 100);
     }
 
     public function updateForOffer(ScrapedOffer $offer): OfferSearchDocument

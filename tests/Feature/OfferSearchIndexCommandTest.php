@@ -155,6 +155,44 @@ class OfferSearchIndexCommandTest extends TestCase
         );
     }
 
+    public function test_batch_rebuild_indexes_every_offer_without_loading_raw_source_payloads(): void
+    {
+        $grocer = Grocer::factory()->create(['slug' => 'bilka']);
+        $batch = ImportBatch::factory()->for($grocer)->create();
+        $paper = Paper::factory()->for($grocer)->for($batch)->create();
+        $product = GrocerProduct::factory()->for($grocer)->create([
+            'brand' => 'Example brand',
+            'category' => 'Dairy',
+            'subcategory' => 'Milk',
+            'description' => 'Product description',
+            'image_url' => 'https://images.example/milk.jpg',
+            'raw_detail_payload' => ['data' => str_repeat('x', 65536)],
+        ]);
+        ScrapedOffer::factory()->count(101)->for($grocer)->for($batch)->for($paper)->for($product)->create([
+            'source_payload' => ['data' => str_repeat('x', 65536)],
+        ]);
+
+        $loadedOffers = 0;
+        ScrapedOffer::retrieved(function (ScrapedOffer $offer) use (&$loadedOffers): void {
+            $this->assertArrayNotHasKey('source_payload', $offer->getAttributes());
+            $loadedOffers++;
+        });
+        GrocerProduct::retrieved(function (GrocerProduct $product): void {
+            $this->assertArrayNotHasKey('raw_detail_payload', $product->getAttributes());
+        });
+
+        (new OfferSearchDocumentBuilder)->rebuildForImportBatch($batch);
+
+        $this->assertSame(101, $loadedOffers);
+        $this->assertSame(101, OfferSearchDocument::query()->where('paper_id', $paper->id)->count());
+        $document = OfferSearchDocument::query()->where('paper_id', $paper->id)->firstOrFail();
+        $this->assertSame('Example brand', $document->brand);
+        $this->assertSame('Dairy', $document->category);
+        $this->assertSame('Milk', $document->subcategory);
+        $this->assertSame('Product description', $document->description);
+        $this->assertSame('https://images.example/milk.jpg', $document->image_url);
+    }
+
     private function offer(Grocer $grocer, string $title, float $price): void
     {
         $offer = $this->scrapedOffer($grocer, $title, $price);
